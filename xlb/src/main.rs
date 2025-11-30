@@ -5,7 +5,7 @@ mod xlb_config;
 use crate::xlb_config::XlbConfig;
 use anyhow::Context as _;
 use aya::programs::{Xdp, XdpFlags};
-use aya::{BpfLoader, EbpfLoader};
+use aya::EbpfLoader;
 use log::info;
 #[rustfmt::skip]
 use log::warn;

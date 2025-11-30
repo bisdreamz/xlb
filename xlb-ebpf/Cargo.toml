@@ -2,6 +2,7 @@
 name = "xlb-ebpf"
 version = "0.1.0"
 edition.workspace = true
+autobins = false  # Don't auto-discover main.rs as a binary
 
 [dependencies]
 xlb-common = { path = "../xlb-common" }
@@ -12,8 +13,3 @@ network-types = "0.1.0"
 
 [build-dependencies]
 which = { workspace = true }
-
-[[bin]]
-name = "xlb"
-path = "src/main.rs"
-test = false  # Don't try to test the eBPF binary

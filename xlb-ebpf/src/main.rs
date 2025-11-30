@@ -57,7 +57,7 @@ pub fn xlb(ctx: XdpContext) -> u32 {
     xdp_action::XDP_PASS
 }
 
-#[cfg(not(test))]
+#[cfg(target_os = "none")]
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
     loop {}

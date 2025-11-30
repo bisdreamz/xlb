@@ -16,3 +16,4 @@ which = { workspace = true }
 [[bin]]
 name = "xlb"
 path = "src/main.rs"
+test = false  # Don't try to test the eBPF binary

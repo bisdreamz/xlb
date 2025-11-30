@@ -5,7 +5,7 @@ members = [
     "xlb-common",
     "xlb-ebpf",
 ]
-default-members = ["xlb", "xlb-common"]
+default-members = ["xlb", "xlb-common", "xlb-ebpf"]
 
 [workspace.package]
 license = "MIT OR Apache-2.0"

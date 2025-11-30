@@ -12,6 +12,7 @@ user = ["aya"]
 [dependencies]
 aya = { workspace = true, optional = true }
 strum = { version = "0.27.2", default-features = false, features = ["strum_macros", "derive"] }
+serde = { version = "1.0.228", default-features = false, features = ["derive"] }
 
 [lib]
 path = "src/lib.rs"

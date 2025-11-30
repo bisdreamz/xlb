@@ -1,6 +1,6 @@
 use crate::net::eth::MacAddr;
 use network_types::eth::EthHdr;
-use xlb_common::config::net::IpVersion;
+use xlb_common::net::IpVersion;
 
 pub struct EthHeader<'a> {
     hdr: &'a mut EthHdr,

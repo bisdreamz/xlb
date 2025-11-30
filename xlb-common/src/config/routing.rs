@@ -1,5 +1,8 @@
+use serde::{Serialize, Deserialize};
+
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum RoutingMode {
     /// Packets pass through lb bi-directionally, and is compatible
     /// with all deployment environments

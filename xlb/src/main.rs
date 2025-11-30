@@ -1,23 +1,27 @@
+mod listen;
 mod xlb_config;
 
 use anyhow::Context as _;
 use aya::programs::{Xdp, XdpFlags};
-use clap::Parser;
+use log::info;
 #[rustfmt::skip]
 use log::warn;
+use crate::xlb_config::XlbConfig;
 use tokio::signal;
-
-#[derive(Debug, Parser)]
-struct Opt {
-    #[clap(short, long, default_value = "eth0")]
-    iface: String,
-}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let opt = Opt::parse();
-
     env_logger::init();
+
+    let config = XlbConfig::load("xlb.yaml".into())?;
+    let iface = listen::get_listen_iface(config.listen)?;
+
+    info!(
+        "Starting XLB service ({}) on {} ({:?})",
+        config.name.unwrap_or("xlb".into()),
+        iface.name,
+        iface.ip
+    );
 
     // This will include your eBPF object file as raw bytes at compile-time and load it at
     // runtime. This approach is recommended for most real-world use cases. If you would
@@ -45,10 +49,10 @@ async fn main() -> anyhow::Result<()> {
             });
         }
     }
-    let Opt { iface } = opt;
+
     let program: &mut Xdp = ebpf.program_mut("xlb").unwrap().try_into()?;
     program.load()?;
-    program.attach(&iface, XdpFlags::default())
+    program.attach(&iface.name, XdpFlags::default())
         .context("failed to attach the XDP program with default flags - try changing XdpFlags::default() to XdpFlags::SKB_MODE")?;
 
     let ctrl_c = signal::ctrl_c();

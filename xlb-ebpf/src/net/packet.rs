@@ -3,7 +3,7 @@ use crate::net::types::{IpHeader, ProtoHeader};
 use crate::{net, utils};
 use aya_ebpf::programs::XdpContext;
 use xlb_common::XlbStatus;
-use xlb_common::config::net::{IpVersion, Proto};
+use xlb_common::net::{IpVersion, Proto};
 
 pub struct Packet<'a> {
     // ctx: XdpContext, if we need ownership later?

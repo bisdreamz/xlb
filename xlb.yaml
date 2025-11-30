@@ -1,0 +1,8 @@
+provider:
+  static:
+    backends:
+      - 127.0.0.1
+      - 127.0.0.2
+ports:
+  - local_port: 80
+    remote_port: 8080

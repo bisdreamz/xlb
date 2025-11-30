@@ -100,7 +100,7 @@ fn get_iface_for_ip(ip: IpAddr) -> Result<ListenIface> {
 }
 
 /// Retrieves the ['ListenIface'] details to listen on based on the provided listen config
-pub fn get_listen_iface(listen: ListenAddr) -> Result<ListenIface> {
+pub fn get_listen_iface(listen: &ListenAddr) -> Result<ListenIface> {
     match listen {
         ListenAddr::Auto => detect_default(),
         ListenAddr::Ip(ip) => get_iface_for_ip(ip.parse()?),

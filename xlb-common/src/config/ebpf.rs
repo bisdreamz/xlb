@@ -28,3 +28,6 @@ impl EbpfConfig {
         }
     }
 }
+
+#[cfg(feature = "user")]
+unsafe impl aya::Pod for EbpfConfig {}

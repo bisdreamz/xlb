@@ -2,6 +2,7 @@ use anyhow::{Result, bail};
 use config::Config;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use xlb_common::config::routing::RoutingMode;
 use xlb_common::net::Proto;
 use xlb_common::types::PortMapping;
 
@@ -39,6 +40,8 @@ pub struct XlbConfig {
     pub proto: Proto,
     pub ports: Vec<PortMapping>,
     pub provider: BackendProvider,
+    #[serde(default)]
+    pub mode: RoutingMode,
 }
 
 impl XlbConfig {

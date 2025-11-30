@@ -15,3 +15,6 @@ pub struct PortMapping {
     /// src port from a client connection
     pub remote_port: u16,
 }
+
+#[cfg(feature = "user")]
+unsafe impl aya::Pod for PortMapping {}

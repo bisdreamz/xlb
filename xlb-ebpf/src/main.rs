@@ -14,6 +14,9 @@ use xlb_common::config::ebpf::EbpfConfig;
 #[unsafe(no_mangle)]
 static mut CONFIG: EbpfConfig = EbpfConfig::empty();
 
+#[unsafe(no_mangle)]
+static mut SHUTDOWN: bool = false;
+
 #[xdp]
 pub fn xlb(ctx: XdpContext) -> u32 {
     let packet = match Packet::new(&ctx) {

@@ -1,0 +1,18 @@
+[package]
+name = "xlb-ebpf"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+xlb-common = { path = "../xlb-common" }
+
+aya-ebpf = { workspace = true }
+aya-log-ebpf = { workspace = true }
+network-types = "0.1.0"
+
+[build-dependencies]
+which = { workspace = true }
+
+[[bin]]
+name = "xlb"
+path = "src/main.rs"

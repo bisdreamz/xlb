@@ -2,8 +2,8 @@
 //extern crate alloc;
 
 pub mod config;
+mod errs;
 pub mod net;
 pub mod types;
-mod xlb_status;
 
-pub use xlb_status::XlbStatus;
+pub use errs::XlbErr;

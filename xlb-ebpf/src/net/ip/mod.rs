@@ -1,5 +1,5 @@
-mod ipv4;
-mod ipv6;
+mod v4;
+mod v6;
 
-pub use ipv4::Ipv4Header;
-pub use ipv6::Ipv6Header;
+pub use v4::Ipv4Header;
+pub use v6::Ipv6Header;

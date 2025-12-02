@@ -27,10 +27,6 @@ async fn main() -> anyhow::Result<()> {
 
     let ebpf_config = ebpf::to_ebpf_config(&config, &iface);
 
-    // This will include your eBPF object file as raw bytes at compile-time and load it at
-    // runtime. This approach is recommended for most real-world use cases. If you would
-    // like to specify the eBPF program at runtime rather than at compile-time, you can
-    // reach for `Bpf::load_file` instead.
     let mut ebpf = EbpfLoader::new()
         .override_global("CONFIG", &ebpf_config, true)
         .load(aya::include_bytes_aligned!(concat!(
@@ -40,7 +36,6 @@ async fn main() -> anyhow::Result<()> {
 
     match aya_log::EbpfLogger::init(&mut ebpf) {
         Err(e) => {
-            // This can happen if you remove all log statements from your eBPF program.
             warn!("failed to initialize eBPF logger: {e}");
         }
         Ok(logger) => {

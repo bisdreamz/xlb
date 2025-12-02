@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[repr(C)]
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum RoutingMode {

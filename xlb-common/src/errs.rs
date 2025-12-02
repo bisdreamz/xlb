@@ -1,5 +1,6 @@
 use strum::IntoStaticStr;
 
+#[repr(u8)]
 #[derive(Clone, Copy, PartialEq, Eq, IntoStaticStr)]
 #[cfg_attr(not(target_os = "none"), derive(Debug))]
 pub enum XlbErr {

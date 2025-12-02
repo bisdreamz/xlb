@@ -1,3 +1,4 @@
+#[repr(C)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MacAddr {
     addr: [u8; 6],

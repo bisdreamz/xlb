@@ -1,4 +1,6 @@
 use serde::Deserialize;
+use strum::IntoStaticStr;
+use crate::net::IpVersion;
 
 /// Generic port mapping struct representing
 /// a port on the local machine and a port
@@ -20,24 +22,30 @@ pub struct PortMapping {
 unsafe impl aya::Pod for PortMapping {}
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct Backend {
     /// IP address of the backend packed into a u128 which
     /// can be ipv4 or ipv6
     pub ip: u128,
-    /// Aggregate count of live connections
-    pub conns: u16,
+    pub src_iface_ip: u128,
     /// Aggregate count of bytes transferred
     /// across live connections
     pub bytes_transfer: u64,
+    pub src_iface_mac: [u8; 6],
+    pub next_hop_mac: [u8; 6],
+    pub src_iface_ifindex: u16,
+    /// Aggregate count of live connections
+    pub conns: u16,
+    /// The ip protovol ver
+    pub ip_ver: IpVersion
 }
 
 #[cfg(feature = "user")]
 unsafe impl aya::Pod for Backend {}
 
 /// Denotes the directional flow of a packet
-#[repr(u8)]
-#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IntoStaticStr)]
 pub enum FlowDirection {
     /// Flow is toward the client and the incoming
     /// data is from a backend
@@ -60,6 +68,12 @@ pub struct Flow {
     /// Direction of this flow which denotes
     /// the destination for this packet
     pub direction: FlowDirection,
+    /// The original client IP the external
+    /// request associated with this flow
+    pub client_ip: u128,
+    /// The backend IP of the node associated
+    /// with this flow
+    pub backend_ip: u128,
     /// The source IP value of the out iface
     /// used to reach the dst_ip.
     /// This may not  be the load balancer primary IP in
@@ -96,10 +110,35 @@ pub struct Flow {
     /// Counter of total bytes transferred across this flow
     /// for its lifetime
     pub bytes_transfer: u64,
+    /// Counter of total packets transferred across this flow
+    pub packets_transfer: u64,
+    /// Monotonic timestamp for when this
+    /// flow was created if value > 0
+    pub created_at_ns: u64,
     /// Monotonic timestamp of the last packet
     /// seen on this flow
     pub last_seen_ns: u64,
+    /// Monotonic timestamp for when this
+    /// flow was closed if value > 0
+    pub closed_at_ns: u64
 }
 
 #[cfg(feature = "user")]
 unsafe impl aya::Pod for Flow {}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FlowKey {
+    pub ip: u128,
+    pub port: u16,
+    pub _pad: [u8; 6],
+}
+
+impl FlowKey {
+    pub fn new(ip: u128, port: u16) -> Self {
+        Self { ip, port, _pad: [0; 6] }
+    }
+}
+
+#[cfg(feature = "user")]
+unsafe impl aya::Pod for FlowKey {}

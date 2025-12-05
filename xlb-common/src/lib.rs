@@ -2,6 +2,7 @@
 //extern crate alloc;
 
 pub mod config;
+pub mod consts;
 mod errs;
 pub mod net;
 pub mod types;

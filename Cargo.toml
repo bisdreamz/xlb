@@ -35,3 +35,7 @@ panic = "abort"
 
 [profile.release]
 panic = "abort"
+
+[workspace.metadata.rust-analyzer]
+xlb = { features = ["build-ebpf"] }
+xlb-ebpf = { features = ["build-ebpf"] }

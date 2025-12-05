@@ -12,4 +12,18 @@ pub enum XlbErr {
     ErrInvalidOp,
     ErrNotYetImpl,
     ErrInvalidIpVal,
+    /// A syn was received when not expexted,
+    /// e.g. from a backend!
+    ErrUnexpectedSyn,
+    /// No available backends
+    ErrNoBackends,
+    /// Fib iface lookup failed finding egress interface
+    /// to reach the backend ip address
+    ErrFibLookupFailed,
+    /// Flow looks like an active connection but
+    /// was not in flow map. Likely a valid conn but
+    /// so inactive it was pruned as an orphan
+    ErrOrphanedFlow,
+    /// Failed to insert flow into map
+    ErrMapInsertFailed
 }

@@ -1,3 +1,4 @@
+use crate::provider::Host;
 use anyhow::{Result, bail};
 use config::Config;
 use serde::{Deserialize, Serialize};
@@ -8,8 +9,8 @@ use xlb_common::types::PortMapping;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum BackendProvider {
-    Static { backends: Vec<String> },
+pub enum BackendSource {
+    Static { backends: Vec<Host> },
     Kubernetes { namespace: String, service: String },
 }
 
@@ -24,6 +25,11 @@ pub enum ListenAddr {
     /// Specify an ipv4 listen addr, also used to determine
     /// the target interface
     Ip(String),
+    /// Specific interface, IP combo
+    Exact {
+        iface: String,
+        ip: String
+    }
 }
 
 /// The user facing application config
@@ -39,7 +45,7 @@ pub struct XlbConfig {
     #[serde(default)]
     pub proto: Proto,
     pub ports: Vec<PortMapping>,
-    pub provider: BackendProvider,
+    pub provider: BackendSource,
     #[serde(default)]
     pub mode: RoutingMode,
 }
@@ -53,21 +59,6 @@ impl XlbConfig {
 
         if config.ports.is_empty() || config.ports.len() > 8 {
             bail!("Number of port mappings must be between 1 and 8");
-        }
-
-        match &config.provider {
-            BackendProvider::Static { backends } => {
-                if backends.is_empty() {
-                    bail!("At least one backend must be specified for static deployments");
-                }
-
-                for backend in backends {
-                    let _addr = backend
-                        .parse::<std::net::IpAddr>()
-                        .map_err(|_| anyhow::anyhow!("Invalid backend address: {}", backend))?;
-                }
-            }
-            _ => (),
         }
 
         Ok(config)

@@ -4,12 +4,25 @@ version = "0.1.0"
 edition.workspace = true
 autobins = false  # Don't auto-discover main.rs as a binary
 
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "xlb-bpf"
+path = "src/main.rs"
+required-features = ["build-ebpf"]
+
+[features]
+# Feature that must be explicitly enabled to build the eBPF binary
+build-ebpf = []
+
 [dependencies]
 xlb-common = { path = "../xlb-common" }
 
 aya-ebpf = { workspace = true }
 aya-log-ebpf = { workspace = true }
 network-types = "0.1.0"
+log = "0.4.28"
 
 [build-dependencies]
 which = { workspace = true }

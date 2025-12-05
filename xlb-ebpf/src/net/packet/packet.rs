@@ -2,8 +2,9 @@ use crate::net::eth::{EthHeader, MacAddr};
 use crate::net::types::{IpHeader, ProtoHeader};
 use crate::{net, utils};
 use aya_ebpf::programs::XdpContext;
-use xlb_common::XlbErr;
+use aya_log_ebpf::info;
 use xlb_common::net::{IpVersion, Proto};
+use xlb_common::XlbErr;
 
 pub struct Packet<'a> {
     ctx: &'a XdpContext,
@@ -37,6 +38,14 @@ impl<'a> Packet<'a> {
         }))
     }
 
+    pub fn xdp_context(&self) -> &'_ XdpContext {
+        self.ctx
+    }
+
+    pub fn size(&self) -> u64 {
+        (self.ctx.data_end() - self.ctx.data()) as u64
+    }
+
     pub fn eth_hdr(&self) -> &EthHeader<'_> {
         &self.eth_hdr
     }
@@ -60,6 +69,75 @@ impl<'a> Packet<'a> {
         match self.proto_hdr {
             ProtoHeader::Tcp(_) => Proto::Tcp,
             ProtoHeader::Udp(_) => Proto::Udp,
+        }
+    }
+
+    pub fn src_ip(&self) -> u128 {
+        match &self.ip_hdr {
+            IpHeader::Ipv4(ipv4) => ipv4.src_addr() as u128,
+            IpHeader::Ipv6(_) => 0,
+        }
+    }
+
+    pub fn dst_ip(&self) -> u128 {
+        match &self.ip_hdr {
+            IpHeader::Ipv4(ipv4) => ipv4.dst_addr() as u128,
+            IpHeader::Ipv6(_) => 0,
+        }
+    }
+
+    pub fn src_port(&self) -> u16 {
+        match &self.proto_hdr {
+            ProtoHeader::Tcp(tcp) => tcp.src_port(),
+            ProtoHeader::Udp(_) => 0,
+        }
+    }
+
+    pub fn dst_port(&self) -> u16 {
+        match &self.proto_hdr {
+            ProtoHeader::Tcp(tcp) => tcp.dst_port(),
+            ProtoHeader::Udp(_) => 0,
+        }
+    }
+
+    pub fn ip_total_len(&self) -> u16 {
+        match &self.ip_hdr {
+            IpHeader::Ipv4(ipv4) => ipv4.total_len(),
+            IpHeader::Ipv6(_) => 0, // TODO: IPv6 support
+        }
+    }
+
+    /// Logs major packet details for debugging
+    pub fn dump(&self, label: &str) {
+        let src_mac = self.eth_hdr.src_mac().as_bytes();
+        let dst_mac = self.eth_hdr.dst_mac().as_bytes();
+
+        info!(
+            self.ctx,
+            "{} MAC: {:x}:{:x}:{:x}:{:x}:{:x}:{:x} -> {:x}:{:x}:{:x}:{:x}:{:x}:{:x}",
+            label,
+            src_mac[0], src_mac[1], src_mac[2], src_mac[3], src_mac[4], src_mac[5],
+            dst_mac[0], dst_mac[1], dst_mac[2], dst_mac[3], dst_mac[4], dst_mac[5]
+        );
+
+        match &self.ip_hdr {
+            IpHeader::Ipv4(ipv4) => {
+                let src_ip = ipv4.src_addr();
+                let dst_ip = ipv4.dst_addr();
+
+                info!(
+                    self.ctx,
+                    "{} IP: {}.{}.{}.{}:{} -> {}.{}.{}.{}:{}",
+                    label,
+                    (src_ip >> 24) & 0xff, (src_ip >> 16) & 0xff, (src_ip >> 8) & 0xff, src_ip & 0xff,
+                    self.src_port(),
+                    (dst_ip >> 24) & 0xff, (dst_ip >> 16) & 0xff, (dst_ip >> 8) & 0xff, dst_ip & 0xff,
+                    self.dst_port()
+                );
+            }
+            IpHeader::Ipv6(_) => {
+                info!(self.ctx, "{}: IPv6", label);
+            }
         }
     }
 
@@ -96,14 +174,50 @@ impl<'a> Packet<'a> {
                     return Err(XlbErr::ErrInvalidIpVal);
                 }
 
-                ipv4.set_src_dst_addrs(src_ip_addr as u32, dst_ip_addr as u32)
+                let old_src_ip = ipv4.src_addr();
+                let old_dst_ip = ipv4.dst_addr();
+
+                let new_src_ip = src_ip_addr as u32;
+                let new_dst_ip = dst_ip_addr as u32;
+
+                // Update IP addresses (also updates IP header checksum)
+                ipv4.set_src_dst_addrs(new_src_ip, new_dst_ip);
+
+                // Incremental TCP checksum update with validation
+                match &mut self.proto_hdr {
+                    ProtoHeader::Tcp(tcp) => {
+                        // Verify incoming checksum
+                        let (incoming_cksum, expected_cksum) = tcp.verify_checksum_header_only(old_src_ip, old_dst_ip);
+                        info!(self.ctx, "BEFORE NAT: incoming=0x{:x} expected(hdr-only)=0x{:x}",
+                              incoming_cksum, expected_cksum);
+
+                        let old_src_port = tcp.src_port();
+                        let old_dst_port = tcp.dst_port();
+
+                        // Update checksum incrementally
+                        tcp.update_checksum_for_nat(
+                            old_src_ip,
+                            old_dst_ip,
+                            old_src_port,
+                            old_dst_port,
+                            new_src_ip,
+                            new_dst_ip,
+                            src_port,
+                            dst_port,
+                        );
+
+                        // Update port values
+                        tcp.set_ports_no_checksum(src_port, dst_port);
+
+                        // Verify outgoing checksum
+                        let (outgoing_cksum, expected_out) = tcp.verify_checksum_header_only(new_src_ip, new_dst_ip);
+                        info!(self.ctx, "AFTER NAT: outgoing=0x{:x} expected(hdr-only)=0x{:x}",
+                              outgoing_cksum, expected_out);
+                    }
+                    ProtoHeader::Udp(_) => return Err(XlbErr::ErrNotYetImpl),
+                }
             }
             IpHeader::Ipv6(_) => return Err(XlbErr::ErrNotYetImpl),
-        }
-
-        match &mut self.proto_hdr {
-            ProtoHeader::Tcp(tcp) => tcp.set_src_dst_ports(src_port, dst_port),
-            ProtoHeader::Udp(_) => return Err(XlbErr::ErrNotYetImpl),
         }
 
         Ok(())

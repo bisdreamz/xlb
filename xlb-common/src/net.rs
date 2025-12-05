@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use strum::IntoStaticStr;
 
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, IntoStaticStr)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, IntoStaticStr)]
 #[serde(rename_all = "lowercase")]
 pub enum IpVersion {
     #[default]
@@ -14,7 +14,7 @@ pub enum IpVersion {
 unsafe impl aya::Pod for IpVersion {}
 
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, IntoStaticStr)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, IntoStaticStr)]
 #[serde(rename_all = "lowercase")]
 pub enum Proto {
     #[default]

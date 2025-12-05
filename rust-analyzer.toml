@@ -1,0 +1,2 @@
+[workspace]
+cargo.features = ["xlb/build-ebpf", "xlb-ebpf/build-ebpf"]

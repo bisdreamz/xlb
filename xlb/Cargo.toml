@@ -2,8 +2,13 @@
 name = "xlb"
 version = "0.1.0"
 edition.workspace = true
+default-run = "xlb"
 
 license.workspace = true
+
+[features]
+default = []
+build-ebpf = []
 
 [dependencies]
 xlb-common = { path = "../xlb-common", features = ["user"] }
@@ -20,10 +25,13 @@ tokio = { workspace = true, features = [
     "rt-multi-thread",
     "net",
     "signal",
+    "time"
 ] }
 config = { version = "0.15.18", default-features = false, features = ["convert-case", "yaml"] }
 serde = { version = "1.0.228", features = ["derive"] }
 default-net = "0.22.0"
+async-trait = "0.1.89"
+sysctl = "0.5"
 [build-dependencies]
 anyhow = { workspace = true }
 aya-build = { workspace = true }
@@ -45,3 +53,5 @@ xlb-ebpf = { path = "../xlb-ebpf" }
 [[bin]]
 name = "xlb"
 path = "src/main.rs"
+test = false
+bench = false

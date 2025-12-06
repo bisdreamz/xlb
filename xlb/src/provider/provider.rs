@@ -1,7 +1,7 @@
 use crate::system;
 use anyhow::Result;
 use async_trait::async_trait;
-use log::{info, trace};
+use log::trace;
 use serde::Deserialize;
 use std::net::IpAddr;
 use xlb_common::net::IpVersion;

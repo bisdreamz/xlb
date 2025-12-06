@@ -1,5 +1,6 @@
 use network_types::ip::Ipv6Hdr;
 
+#[allow(dead_code)]
 pub struct Ipv6Header<'a> {
     hdr: &'a mut Ipv6Hdr,
 }

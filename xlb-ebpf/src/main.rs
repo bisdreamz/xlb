@@ -10,15 +10,14 @@ mod balancing;
 
 use crate::handler::{PacketEvent, PacketHandler};
 use crate::net::packet::Packet;
-use crate::net::types::IpHeader;
 use aya_ebpf::macros::map;
 use aya_ebpf::maps::{Array, HashMap};
 use aya_ebpf::{bindings::xdp_action, macros::xdp, programs::XdpContext};
 use aya_ebpf::helpers::bpf_redirect;
-use aya_log_ebpf::{debug, info, warn};
+use aya_log_ebpf::{debug, info, trace, warn};
 use xlb_common::config::ebpf::EbpfConfig;
-use xlb_common::types::{Backend, Flow, FlowDirection, FlowKey};
-use xlb_common::{consts, XlbErr};
+use xlb_common::types::{Backend, Flow};
+use xlb_common::consts;
 
 /// Shared global state config stored in a map for runtime updates
 #[map(name = "CONFIG")]
@@ -30,17 +29,17 @@ static CONFIG: Array<EbpfConfig> = Array::with_max_entries(1, 0);
 static BACKENDS: Array<Backend> = Array::with_max_entries(consts::MAX_BACKENDS, 0);
 
 #[map(name = "FLOW_MAP")]
-static mut FLOW_MAP: HashMap<FlowKey, Flow> = HashMap::with_max_entries(consts::MAX_ACTIVE_FLOWS, 0);
+static mut FLOW_MAP: HashMap<u64, Flow> = HashMap::with_max_entries(consts::MAX_ACTIVE_FLOWS, 0);
 
 #[unsafe(no_mangle)]
-static mut SHUTDOWN: bool = false;
+pub static SHUTDOWN: bool = false;
 
 #[xdp]
 pub fn xlb(ctx: XdpContext) -> u32 {
     let mut packet = match Packet::new(&ctx) {
         Ok(Some(packet)) => packet,
         Ok(None) => {
-            debug!(&ctx, "Valid packet but misc protos, passing");
+            trace!(&ctx, "Valid packet but misc protos, passing");
 
             return xdp_action::XDP_PASS;
         }
@@ -59,27 +58,31 @@ pub fn xlb(ctx: XdpContext) -> u32 {
             return xdp_action::XDP_ABORTED;
         }
     };
-    let flow_map = unsafe { core::ptr::addr_of_mut!(FLOW_MAP) };
+    let flow_map = core::ptr::addr_of_mut!(FLOW_MAP);
+    let shutdown = unsafe { core::ptr::read_volatile(&SHUTDOWN) };
 
     unsafe {
-        match PacketHandler::handle(&ctx, &mut packet, config, &BACKENDS, &*flow_map) {
+        match PacketHandler::handle(&ctx, &mut packet, config, &BACKENDS, &*flow_map, shutdown) {
             Ok(action) => {
                 match action {
                     PacketEvent::Pass => {
-                        info!(&ctx, "Handle pass");
+                        trace!(&ctx, "Handle pass");
 
                         xdp_action::XDP_PASS
                     },
+                    PacketEvent::Return => {
+                        trace!(&ctx, "Handle return");
+
+                        xdp_action::XDP_TX
+                    },
                     PacketEvent::Forward(iface) => {
-                        info!(&ctx, "Handle OK");
+                        debug!(&ctx, "Handle OK");
 
                         let ingress_ifindex = ctx.ingress_ifindex() as u32;
-                        
-                        info!(&ctx, "Forwarding to iface {} (ingress={})", iface.idx, ingress_ifindex);
 
-                        let ret = bpf_redirect(iface.idx as u32, 0);
-                        info!(&ctx, "bpf_redirect returned: {}", ret);
-                        ret as u32
+                        trace!(&ctx, "Forwarding to iface {} (ingress={})", iface.idx, ingress_ifindex);
+
+                        bpf_redirect(iface.idx as u32, 0) as u32
                     }
                 }
             }

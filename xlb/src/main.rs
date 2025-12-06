@@ -4,6 +4,7 @@ mod r#loop;
 mod provider;
 mod system;
 
+use std::sync::Arc;
 use crate::config::{BackendSource, XlbConfig};
 use crate::provider::{BackendProvider, FixedProvider};
 use crate::r#loop::MaintenanceLoop;
@@ -13,7 +14,7 @@ use log::info;
 use std::time::Duration;
 #[rustfmt::skip]
 use tokio::signal;
-use xlb_common::types::{Backend, Flow, FlowKey};
+use xlb_common::types::{Backend, Flow};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -49,27 +50,37 @@ async fn main() -> anyhow::Result<()> {
         .take_map("BACKENDS")
         .ok_or_else(|| anyhow!("Failed to load BACKENDS map"))?
         .try_into()?;
-    let ebpf_flows: HashMap<_, FlowKey, Flow> = ebpf
+    let ebpf_flows: HashMap<_, u64, Flow> = ebpf
         .take_map("FLOW_MAP")
         .ok_or_else(|| anyhow!("Failed to load FLOW_MAP map"))?
         .try_into()?;
 
+    let arc_provider = Arc::new(provider);
     let maint_loop = MaintenanceLoop::new(
-        Box::new(provider),
+        arc_provider.clone(),
         ebpf_backends,
         ebpf_flows,
-        Duration::from_mins(5)
+        Duration::from_secs(config.orphan_ttl_secs as u64)
     );
 
     let loop_handle = maint_loop.start(Duration::from_secs(1));
 
     let ctrl_c = signal::ctrl_c();
-    println!("Waiting for Ctrl-C...");
+    info!("Waiting for Ctrl-C...");
 
     ctrl_c.await?;
-    println!("Exiting...");
+    info!("Beginning graceful shutdown...");
 
     loop_handle.stop();
+    info!("Maintenance loop stopped");
+    arc_provider.shutdown().await
+        .context("Failed to shutdown backend provider")?;
+    info!("Backend provider shutdown");
+
+    info!("Waiting for graceful shutdown timeout to rst conns...");
+    tokio::time::sleep(Duration::from_secs(config.shutdown_timeout as u64)).await;
+
+    info!("Graceful shutdown complete");
 
     Ok(())
 }

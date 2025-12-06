@@ -3,7 +3,8 @@ provider:
     backends:
     -
       name: docker
-      ip: 10.213.64.120
+      ip: 192.168.50.103
 ports:
   - local_port: 80
     remote_port: 8080
+shutdown_timeout: 5

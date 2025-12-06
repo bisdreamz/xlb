@@ -11,6 +11,7 @@ pub fn extract_ipv4_tcp_hdr_ptr(ctx: &XdpContext) -> Result<*mut TcpHdr, ()> {
 }
 
 #[inline(always)]
+#[allow(dead_code)]
 pub fn extract_ipv6_tcp_hdr_ptr(ctx: &XdpContext) -> Result<*mut TcpHdr, ()> {
     ptr_at::<TcpHdr>(ctx, EthHdr::LEN + Ipv6Hdr::LEN)
 }
@@ -21,6 +22,7 @@ pub fn extract_ipv4_udp_hdr_ptr(ctx: &XdpContext) -> Result<*mut UdpHdr, ()> {
 }
 
 #[inline(always)]
+#[allow(dead_code)]
 pub fn extract_ipv6_udp_hdr_ptr(ctx: &XdpContext) -> Result<*mut UdpHdr, ()> {
     ptr_at::<UdpHdr>(ctx, EthHdr::LEN + Ipv6Hdr::LEN)
 }

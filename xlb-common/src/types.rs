@@ -127,7 +127,7 @@ pub struct Flow {
 unsafe impl aya::Pod for Flow {}
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FlowKey {
     pub ip: u128,
     pub port: u16,
@@ -137,6 +137,19 @@ pub struct FlowKey {
 impl FlowKey {
     pub fn new(ip: u128, port: u16) -> Self {
         Self { ip, port, _pad: [0; 6] }
+    }
+
+    #[inline(always)]
+    pub fn hash_key(&self) -> u64 {
+        let ip_hash = (self.ip as u64) ^ ((self.ip >> 64) as u64);
+        ip_hash.wrapping_mul(31).wrapping_add(self.port as u64)
+    }
+}
+
+impl core::hash::Hash for FlowKey {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        self.ip.hash(state);
+        self.port.hash(state);
     }
 }
 

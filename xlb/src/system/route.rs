@@ -4,14 +4,6 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::process::Command;
 use xlb_common::types::Backend;
 
-#[derive(Debug)]
-pub struct RouteInfo {
-    pub src_ip: u128,
-    pub src_mac: [u8; 6],
-    pub next_hop_mac: [u8; 6],
-    pub ifindex: u32,
-}
-
 /// Populates the routing fields in a Backend struct by performing
 /// route lookups using the `ip route get` command and ARP lookups.
 ///
@@ -59,13 +51,11 @@ pub async fn populate_backend_route(backend: &mut Backend) -> Result<()> {
 }
 
 fn parse_src_ip_from_route(output: &str) -> Result<IpAddr> {
-    for part in output.split_whitespace() {
-        if let Some(idx) = output.find("src ") {
-            let after_src = &output[idx + 4..];
-            if let Some(ip_str) = after_src.split_whitespace().next() {
-                return ip_str.parse()
-                    .map_err(|e| anyhow!("Failed to parse source IP: {}", e));
-            }
+    if let Some(idx) = output.find("src ") {
+        let after_src = &output[idx + 4..];
+        if let Some(ip_str) = after_src.split_whitespace().next() {
+            return ip_str.parse()
+                .map_err(|e| anyhow!("Failed to parse source IP: {}", e));
         }
     }
     Err(anyhow!("No source IP found in route output"))

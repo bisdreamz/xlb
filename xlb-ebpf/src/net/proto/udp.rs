@@ -1,5 +1,6 @@
 use network_types::udp::UdpHdr;
 
+#[allow(dead_code)]
 pub struct UdpHeader<'a> {
     hdr: &'a mut UdpHdr,
 }

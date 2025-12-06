@@ -50,6 +50,7 @@ impl<'a> Packet<'a> {
         &self.eth_hdr
     }
 
+    #[allow(dead_code)]
     pub fn ip_hdr(&self) -> &IpHeader<'_> {
         &self.ip_hdr
     }
@@ -100,6 +101,7 @@ impl<'a> Packet<'a> {
         }
     }
 
+    #[allow(dead_code)]
     pub fn ip_total_len(&self) -> u16 {
         match &self.ip_hdr {
             IpHeader::Ipv4(ipv4) => ipv4.total_len(),
@@ -108,6 +110,7 @@ impl<'a> Packet<'a> {
     }
 
     /// Logs major packet details for debugging
+    #[allow(dead_code)]
     pub fn dump(&self, label: &str) {
         let src_mac = self.eth_hdr.src_mac().as_bytes();
         let dst_mac = self.eth_hdr.dst_mac().as_bytes();
@@ -183,18 +186,13 @@ impl<'a> Packet<'a> {
                 // Update IP addresses (also updates IP header checksum)
                 ipv4.set_src_dst_addrs(new_src_ip, new_dst_ip);
 
-                // Incremental TCP checksum update with validation
+                // Incremental TCP checksum update using RFC 1624
                 match &mut self.proto_hdr {
                     ProtoHeader::Tcp(tcp) => {
-                        // Verify incoming checksum
-                        let (incoming_cksum, expected_cksum) = tcp.verify_checksum_header_only(old_src_ip, old_dst_ip);
-                        info!(self.ctx, "BEFORE NAT: incoming=0x{:x} expected(hdr-only)=0x{:x}",
-                              incoming_cksum, expected_cksum);
-
                         let old_src_port = tcp.src_port();
                         let old_dst_port = tcp.dst_port();
 
-                        // Update checksum incrementally
+                        // Update checksum for NAT (IPs + ports) in one operation
                         tcp.update_checksum_for_nat(
                             old_src_ip,
                             old_dst_ip,
@@ -206,13 +204,8 @@ impl<'a> Packet<'a> {
                             dst_port,
                         );
 
-                        // Update port values
+                        // Update port values after checksum
                         tcp.set_ports_no_checksum(src_port, dst_port);
-
-                        // Verify outgoing checksum
-                        let (outgoing_cksum, expected_out) = tcp.verify_checksum_header_only(new_src_ip, new_dst_ip);
-                        info!(self.ctx, "AFTER NAT: outgoing=0x{:x} expected(hdr-only)=0x{:x}",
-                              outgoing_cksum, expected_out);
                     }
                     ProtoHeader::Udp(_) => return Err(XlbErr::ErrNotYetImpl),
                 }

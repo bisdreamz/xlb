@@ -4,14 +4,15 @@ use crate::net::packet::Packet;
 use crate::net::types::ProtoHeader;
 use aya_ebpf::maps::{Array, HashMap};
 use aya_ebpf::programs::XdpContext;
-use aya_log_ebpf::info;
+use aya_log_ebpf::{debug, info};
 use xlb_common::config::ebpf::EbpfConfig;
-use xlb_common::types::{Backend, Flow, FlowKey};
+use xlb_common::types::{Backend, Flow};
 use xlb_common::XlbErr;
 use crate::net::eth::MacAddr;
 
 pub enum PacketEvent {
     Pass,
+    Return,
     Forward(Iface),
 }
 
@@ -21,22 +22,30 @@ impl PacketHandler {
     pub fn handle(ctx: &XdpContext,
         packet: &mut Packet, config: &EbpfConfig,
                   backends: &'static Array<Backend>,
-                  flow_map: &'static HashMap<FlowKey, Flow>) -> Result<PacketEvent, XlbErr> {
+                  flow_map: &'static HashMap<u64, Flow>,
+                  shutdown: bool) -> Result<PacketEvent, XlbErr> {
 
         if !utils::matches_ipver_and_proto(packet, config) {
             return Ok(PacketEvent::Pass)
         }
 
-        let (direction, port_map) = match utils::get_direction_port_map(ctx, config, packet) {
+        let (direction, port_map) = match utils::get_direction_port_map(config, packet) {
             Some(direction) => direction,
             None => return Ok(PacketEvent::Pass)
         };
 
         let dir_str:&'static str = direction.into();
-        info!(&ctx, "Matched {}", dir_str);
+        debug!(&ctx, "Matched {}", dir_str);
 
         match packet.proto_hdr() {
             ProtoHeader::Tcp(_) => {
+                if shutdown {
+                    debug!(&ctx, "Shutting down, attempting to rst ");
+                    packet.rst()?;
+
+                    return Ok(PacketEvent::Return)
+                }
+
                 let packet_flow = tcp::handle_tcp_packet(
                     packet,
                     &direction,

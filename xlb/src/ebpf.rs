@@ -1,6 +1,6 @@
 use crate::config::XlbConfig;
 use crate::system::ListenIface;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Result, anyhow};
 use aya::{Ebpf, EbpfLoader};
 use aya::maps::Array;
 use aya::programs::{Xdp, XdpFlags};

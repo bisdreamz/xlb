@@ -3,6 +3,7 @@ use anyhow::{Result, bail};
 use config::Config;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::time::Duration;
 use xlb_common::config::routing::RoutingMode;
 use xlb_common::net::Proto;
 use xlb_common::types::PortMapping;
@@ -11,6 +12,7 @@ use xlb_common::types::PortMapping;
 #[serde(rename_all = "lowercase")]
 pub enum BackendSource {
     Static { backends: Vec<Host> },
+    #[allow(dead_code)]
     Kubernetes { namespace: String, service: String },
 }
 
@@ -48,7 +50,14 @@ pub struct XlbConfig {
     pub provider: BackendSource,
     #[serde(default)]
     pub mode: RoutingMode,
+    #[serde(default = "default_orphan_ttl_secs")]
+    pub orphan_ttl_secs: u32,
+    #[serde(default = "default_shutdown_timeout")]
+    pub shutdown_timeout: u32
 }
+
+const fn default_orphan_ttl_secs() -> u32 { 5 * 60 }
+const fn default_shutdown_timeout() -> u32 { 15 }
 
 impl XlbConfig {
     pub fn load(path: PathBuf) -> Result<XlbConfig> {

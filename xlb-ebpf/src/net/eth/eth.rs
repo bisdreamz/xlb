@@ -17,6 +17,7 @@ impl<'a> EthHeader<'a> {
         self.hdr as *const EthHdr
     }
 
+    #[allow(dead_code)]
     pub fn ip_version(&self) -> Result<IpVersion, ()> {
         match self.hdr.ether_type() {
             Ok(network_types::eth::EtherType::Ipv4) => Ok(IpVersion::Ipv4),

@@ -1,7 +1,7 @@
 use crate::r#loop::metrics::Metrics;
 use std::collections::{HashMap, HashSet};
 use xlb_common::types::FlowDirection::ToClient;
-use xlb_common::types::{Flow, FlowKey};
+use xlb_common::types::Flow;
 
 
 #[derive(Debug, Clone, Default)]
@@ -22,6 +22,7 @@ impl AggregateFlowStats {
         self.client_set.insert(client_ip);
     }
 
+    #[allow(dead_code)]
     fn clients_count(&self) -> u32 {
         self.client_set.len() as u32
     }
@@ -45,7 +46,7 @@ fn add_flow_stats(flow: &Flow, metrics: &mut Metrics, event_ns: u64) {
 /// Returns (totals, mapped per backend ip) tuple
 pub fn aggregate_flow_stats<'a>(
     event_ns: u64,
-    flows: impl Iterator<Item = (FlowKey, Flow)>,
+    flows: impl Iterator<Item = (u64, Flow)>,
 ) -> LbFlowStats {
     let mut backends_map = HashMap::new();
     let mut totals = AggregateFlowStats::default();

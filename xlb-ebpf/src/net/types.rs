@@ -8,5 +8,6 @@ pub enum IpHeader<'a> {
 
 pub enum ProtoHeader<'a> {
     Tcp(TcpHeader<'a>),
+    #[allow(dead_code)]
     Udp(UdpHeader<'a>),
 }

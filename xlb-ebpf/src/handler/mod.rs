@@ -5,5 +5,3 @@ mod utils;
 mod iface;
 mod tcp;
 mod types;
-
-pub use handler::*;

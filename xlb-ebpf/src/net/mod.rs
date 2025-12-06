@@ -1,4 +1,3 @@
-mod checksum;
 pub mod eth;
 pub mod ip;
 pub mod proto;

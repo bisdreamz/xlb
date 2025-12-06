@@ -2,13 +2,13 @@ use crate::provider::{BackendProvider, hosts_to_backends_with_routes};
 use crate::r#loop::utils;
 use crate::r#loop::utils::LbFlowStats;
 use aya::maps::{Array, HashMap, MapData};
-use log::{debug, info, trace};
+use log::trace;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tokio::time::interval;
 use xlb_common::consts;
-use xlb_common::types::{Backend, Flow, FlowKey};
+use xlb_common::types::{Backend, Flow};
 
 /*
 * 1) prune orphaned con entries from ebpf flow map
@@ -31,24 +31,25 @@ impl MaintenanceLoopHandle {
 pub struct MaintenanceLoop {
     shutdown: OnceLock<Arc<AtomicBool>>,
     /// Provider of backends
-    provider: Box<dyn BackendProvider>,
+    provider: Arc<dyn BackendProvider>,
     /// Ebpf land backend destination
     ebpf_backends: Array<MapData, Backend>,
     /// Live map of connection flows, see ['Flow']
-    ebpf_flows: HashMap<MapData, FlowKey, Flow>,
+    ebpf_flows: HashMap<MapData, u64, Flow>,
     /// Snapshots of prior loop backen states for
     /// stats delta calculations
     prev_stats: LbFlowStats,
     /// If a flow is active longer than this TTL it is considered
     /// to be an orpaned connection (closed w/o fin or rst)
+    #[allow(dead_code)]
     orphan_ttl: Duration,
 }
 
 impl MaintenanceLoop {
     pub fn new(
-        provider: Box<dyn BackendProvider>,
+        provider: Arc<dyn BackendProvider>,
         ebpf_backends: Array<MapData, Backend>,
-        ebpf_flows: HashMap<MapData, FlowKey, Flow>,
+        ebpf_flows: HashMap<MapData, u64, Flow>,
         orphan_ttl: Duration,
     ) -> Self {
         Self {

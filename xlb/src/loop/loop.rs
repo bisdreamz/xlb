@@ -1,4 +1,4 @@
-use crate::provider::{BackendProvider, hosts_to_backends_with_routes};
+use crate::provider::{hosts_to_backends_with_routes, BackendProvider};
 use crate::r#loop::utils;
 use crate::r#loop::utils::LbFlowStats;
 use aya::maps::{Array, HashMap, MapData};
@@ -9,14 +9,6 @@ use std::time::Duration;
 use tokio::time::interval;
 use xlb_common::consts;
 use xlb_common::types::{Backend, Flow};
-
-/*
-* 1) prune orphaned con entries from ebpf flow map
- * 2) rebuild backends list and aggregate stats for ebpf
- * 3) calculate backend deltas between old and new
-        backend maps to determine otel metric values
-        to  export in rate form e.g. per second
- */
 
 pub struct MaintenanceLoopHandle {
     shutdown: Arc<AtomicBool>,
@@ -72,6 +64,7 @@ impl MaintenanceLoop {
 
         let deltas = utils::calc_aggregate_deltas(&self.prev_stats, &stats);
         self.prev_stats = stats;
+
         trace!("Delta stats: {:?}", deltas);
 
         let new_hosts = self.provider.get_backends();
@@ -88,9 +81,8 @@ impl MaintenanceLoop {
                 .expect("Failed to set empty sentinel backend!");
         }
 
-        // TODO how and where to count orhpaned connections?
-
-        // TODO flowmap orhpan and closed conn cleanup here
+        // TODO count and evict orphans from orphan_ttl + last_seen_ns
+        // TODO flowmap closed conn cleanup here
 
         trace!("Updated {} backends", new_backends.len());
     }

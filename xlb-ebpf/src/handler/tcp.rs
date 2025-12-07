@@ -8,13 +8,11 @@ use aya_ebpf::helpers::bpf_get_prandom_u32;
 use aya_ebpf::maps::{Array, HashMap};
 use aya_log_ebpf::{debug, info};
 use xlb_common::config::ebpf::Strategy;
-use xlb_common::types::FlowDirection::ToServer;
 use xlb_common::types::{Backend, Flow, FlowDirection, FlowKey};
 use xlb_common::XlbErr;
 
 /// Process load balancing of a TCP packet, which
-/// handles all required rewriting and backend
-/// selection
+/// handles required rewriting and backend selection
 ///
 /// # Arguments
 /// * 'packet' - The mutable packet which will
@@ -49,7 +47,32 @@ pub fn handle_tcp_packet(packet: &mut Packet,
         return new_flow(packet, &next_backend, port_map_dest, flow_map);
     }
 
+    if tcp.is_fin() || tcp.is_rst() {
+        info!(packet.xdp_context(), "TCP FIN/RST");
+        // record flow state but continue to process
+        close_flow(packet, direction, flow_map)?;
+    }
+
     existing_flow(packet, direction, flow_map)
+}
+
+fn close_flow(packet: &Packet, direction: &FlowDirection, flow_map: &'static HashMap<u64, Flow>) -> Result<(), XlbErr> {
+    let flow_key = utils::get_flow_key(packet, direction);
+    let key_hash = flow_key.hash_key();
+
+    let flow_ptr = flow_map.get_ptr_mut(&key_hash)
+        .ok_or(XlbErr::ErrOrphanedFlow)?;
+    let flow = unsafe { &mut *flow_ptr };
+
+    flow.closed_at_ns = utils::monotonic_time_ns();
+
+    let counter_flow_ptr = flow_map.get_ptr_mut(&flow.counter_flow_key_hash)
+        .ok_or(XlbErr::ErrOrphanedFlow)?;
+    let counter_flow = unsafe { &mut *counter_flow_ptr };
+
+    counter_flow.closed_at_ns = utils::monotonic_time_ns();
+
+    Ok(())
 }
 
 /// Handles routing of an (expectedly) existing flow as fined
@@ -83,6 +106,28 @@ fn existing_flow(packet: &mut Packet, direction: &FlowDirection,
     })
 }
 
+/// Makes 5 attempts to locate a free ephemeral
+/// port between us and the associated backend
+/// Returns a ['FlowKey'] representing the
+/// ['ToClient'] flow and ephemeral port allocated
+#[inline(always)]
+fn find_ephemeral_port(
+    backend: &Backend,
+    flow_map: &'static HashMap<u64, Flow>,
+) -> Result<FlowKey, XlbErr> {
+    for _ in 0..5 {
+        let src_port = (unsafe { bpf_get_prandom_u32() } % 10000) as u16 + 5000;
+        let client_flow_key = utils::client_flow_key(backend.ip, src_port);
+        let client_key_hash = client_flow_key.hash_key();
+
+        if unsafe { flow_map.get(&client_key_hash).is_none() } {
+            return Ok(client_flow_key);
+        }
+    }
+
+    Err(XlbErr::ErrNoEphemeralPorts)
+}
+
 /// Flow path for when a new connection arrives (syn)
 /// Creates flow entries using pre-computed routing information from the backend
 fn new_flow(packet: &mut Packet, backend: &Backend, dest_map_port: u16,
@@ -96,9 +141,16 @@ fn new_flow(packet: &mut Packet, backend: &Backend, dest_map_port: u16,
 
     let now_ns = utils::monotonic_time_ns();
     let packet_flow;
+    let server_key_hash;
+    let client_key_hash;
+
     {
-        let server_flow = new_flow_to_server(packet, backend,
-                                             dest_map_port, &egress_iface, now_ns);
+        let client_key = find_ephemeral_port(backend, flow_map)?;
+        client_key_hash = client_key.hash_key();
+
+        let server_flow = new_flow_to_server(packet, backend, dest_map_port,
+                                             &egress_iface, &client_key, now_ns);
+        server_key_hash = utils::server_flow_key(packet.src_ip(), packet.src_port()).hash_key();
 
         // extract and keep server and client flow off diff stack frames
         packet_flow = PacketFlow {
@@ -111,20 +163,15 @@ fn new_flow(packet: &mut Packet, backend: &Backend, dest_map_port: u16,
             dst_port: server_flow.dst_port,
         };
 
-        // Insert server_flow into map (moves/drops from stack)
-        let server_key = utils::get_flow_key(packet, &ToServer);
-        let server_hash = server_key.hash_key();
-        flow_map.insert(&server_hash, &server_flow, 0)
+        debug!(packet.xdp_context(), "Insert client flow {:i}:{}", client_key.ip as u32, client_key.port);
+
+        flow_map.insert(&server_key_hash, &server_flow, 0)
             .map_err(|_| XlbErr::ErrMapInsertFailed)?;
     }
 
-    let client_flow = new_flow_to_client(packet, backend, packet.dst_ip(), now_ns)?;
-    let client_key = FlowKey::new(backend.ip, packet_flow.src_port);
-    let client_hash = client_key.hash_key();
+    let client_flow = new_flow_to_client(packet, backend, server_key_hash, packet.dst_ip(), now_ns)?;
 
-    debug!(packet.xdp_context(), "Insert client {:i}:{}", client_key.ip as u32, client_key.port);
-
-    flow_map.insert(&client_hash, &client_flow, 0)
+    flow_map.insert(&client_key_hash, &client_flow, 0)
         .map_err(|_| XlbErr::ErrMapInsertFailed)?;
 
     Ok(packet_flow)
@@ -133,16 +180,14 @@ fn new_flow(packet: &mut Packet, backend: &Backend, dest_map_port: u16,
 fn new_flow_to_server(packet: &mut Packet, backend: &Backend,
                       dest_map_port:  u16,
                       egress_iface: &Iface,
+                      client_flow_key: &FlowKey,
                 now_ns: u64) -> Flow {
-    let src_port = (unsafe { bpf_get_prandom_u32() } % 10000) as u16 + 5000;
-    // TODO ephemeral port generation and management code
-
     let to_server = Flow {
         direction: FlowDirection::ToServer,
         client_ip: packet.src_ip(),
         backend_ip: backend.ip,
         src_ip: egress_iface.src_ip,
-        src_port,
+        src_port: client_flow_key.port,
         dst_port: dest_map_port,
         dst_ip: backend.ip,
         dst_mac: egress_iface.mac,
@@ -153,12 +198,14 @@ fn new_flow_to_server(packet: &mut Packet, backend: &Backend,
         created_at_ns: now_ns,
         last_seen_ns: now_ns,
         closed_at_ns: 0,
+        counter_flow_key_hash: client_flow_key.hash_key(),
     };
 
     to_server
 }
 
 fn new_flow_to_client(packet: &mut Packet, backend: &Backend,
+                      counter_flow_key_hash: u64,
                       ext_src_ip: u128, now_ns: u64) -> Result<Flow, XlbErr> {
     Ok(Flow {
         direction: FlowDirection::ToClient,
@@ -178,5 +225,6 @@ fn new_flow_to_client(packet: &mut Packet, backend: &Backend,
         created_at_ns: now_ns,
         last_seen_ns: now_ns,
         closed_at_ns: 0,
+        counter_flow_key_hash
     })
 }

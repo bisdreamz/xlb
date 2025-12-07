@@ -1,9 +1,8 @@
 use crate::provider::Host;
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 use config::Config;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::time::Duration;
 use xlb_common::config::routing::RoutingMode;
 use xlb_common::net::Proto;
 use xlb_common::types::PortMapping;

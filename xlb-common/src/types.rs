@@ -120,7 +120,11 @@ pub struct Flow {
     pub last_seen_ns: u64,
     /// Monotonic timestamp for when this
     /// flow was closed if value > 0
-    pub closed_at_ns: u64
+    pub closed_at_ns: u64,
+    /// Key hash for this flow's counterpart in flow map,
+    /// e.g. if this is a ToServer flow then counter key
+    /// identifies the corresponding ToClient flow key
+    pub counter_flow_key_hash: u64
 }
 
 #[cfg(feature = "user")]
@@ -143,13 +147,6 @@ impl FlowKey {
     pub fn hash_key(&self) -> u64 {
         let ip_hash = (self.ip as u64) ^ ((self.ip >> 64) as u64);
         ip_hash.wrapping_mul(31).wrapping_add(self.port as u64)
-    }
-}
-
-impl core::hash::Hash for FlowKey {
-    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
-        self.ip.hash(state);
-        self.port.hash(state);
     }
 }
 

@@ -1,14 +1,14 @@
 use crate::handler::iface::Iface;
 use crate::handler::{tcp, utils};
+use crate::net::eth::MacAddr;
 use crate::net::packet::Packet;
 use crate::net::types::ProtoHeader;
 use aya_ebpf::maps::{Array, HashMap};
 use aya_ebpf::programs::XdpContext;
-use aya_log_ebpf::{debug, info};
+use aya_log_ebpf::debug;
 use xlb_common::config::ebpf::EbpfConfig;
 use xlb_common::types::{Backend, Flow};
 use xlb_common::XlbErr;
-use crate::net::eth::MacAddr;
 
 pub enum PacketEvent {
     Pass,

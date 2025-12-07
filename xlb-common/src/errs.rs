@@ -25,5 +25,7 @@ pub enum XlbErr {
     /// so inactive it was pruned as an orphan
     ErrOrphanedFlow,
     /// Failed to insert flow into map
-    ErrMapInsertFailed
+    ErrMapInsertFailed,
+    /// Unable to find available ephemeral port
+    ErrNoEphemeralPorts
 }

@@ -36,6 +36,14 @@ impl<'a> TcpHeader<'a> {
         self.hdr.syn() != 0
     }
 
+    pub fn is_fin(&self) -> bool {
+        self.hdr.fin() != 0
+    }
+
+    pub fn is_rst(&self) -> bool {
+        self.hdr.rst() != 0
+    }
+
     /// Set both source and destination ports without updating checksum.
     ///
     /// Use this when you plan to fully recalculate the checksum afterwards.

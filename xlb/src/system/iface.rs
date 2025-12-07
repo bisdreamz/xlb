@@ -1,5 +1,5 @@
 use crate::config::ListenAddr;
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use std::net::IpAddr;
 use xlb_common::net::IpVersion;
 
@@ -104,17 +104,5 @@ pub fn get_listen_iface(listen: &ListenAddr) -> Result<ListenIface> {
     match listen {
         ListenAddr::Auto => detect_default(),
         ListenAddr::Ip(ip) => get_iface_for_ip(ip.parse()?),
-        ListenAddr::Exact { iface, ip } => {
-            let parsed_ip: IpAddr = ip.parse()?;
-            let ver = match parsed_ip {
-                IpAddr::V4(_) => IpVersion::Ipv4,
-                IpAddr::V6(_) => IpVersion::Ipv6,
-            };
-            Ok(ListenIface {
-                name: iface.clone(),
-                ip: parsed_ip,
-                ver,
-            })
-        }
     }
 }

@@ -26,11 +26,6 @@ pub enum ListenAddr {
     /// Specify an ipv4 listen addr, also used to determine
     /// the target interface
     Ip(String),
-    /// Specific interface, IP combo
-    Exact {
-        iface: String,
-        ip: String
-    }
 }
 
 /// The user facing application config

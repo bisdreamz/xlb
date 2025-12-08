@@ -14,7 +14,7 @@ use aya_ebpf::helpers::bpf_redirect;
 use aya_ebpf::macros::map;
 use aya_ebpf::maps::{Array, HashMap};
 use aya_ebpf::{bindings::xdp_action, macros::xdp, programs::XdpContext};
-use aya_log_ebpf::{debug, trace, warn};
+use aya_log_ebpf::warn;
 use xlb_common::config::ebpf::EbpfConfig;
 use xlb_common::consts;
 use xlb_common::types::{Backend, Flow};
@@ -39,6 +39,7 @@ pub fn xlb(ctx: XdpContext) -> u32 {
     let mut packet = match Packet::new(&ctx) {
         Ok(Some(packet)) => packet,
         Ok(None) => {
+            #[cfg(debug_assertions)]
             trace!(&ctx, "Valid packet but misc protos, passing");
 
             return xdp_action::XDP_PASS;
@@ -62,25 +63,22 @@ pub fn xlb(ctx: XdpContext) -> u32 {
     let shutdown = unsafe { core::ptr::read_volatile(&SHUTDOWN) };
 
     unsafe {
-        match PacketHandler::handle(&ctx, &mut packet, config, &BACKENDS, &*flow_map, shutdown) {
+        match PacketHandler::handle(&mut packet, config, &BACKENDS, &*flow_map, shutdown) {
             Ok(action) => {
                 match action {
                     PacketEvent::Pass => {
-                        trace!(&ctx, "Handle pass");
+                        packet_log_trace!(packet, "Handle pass");
 
                         xdp_action::XDP_PASS
                     },
                     PacketEvent::Return => {
-                        trace!(&ctx, "Handle return");
+                        packet_log_trace!(packet, "Handle return");
 
                         xdp_action::XDP_TX
                     },
                     PacketEvent::Forward(iface) => {
-                        debug!(&ctx, "Handle OK");
-
-                        let ingress_ifindex = ctx.ingress_ifindex() as u32;
-
-                        trace!(&ctx, "Forwarding to iface {} (ingress={})", iface.idx, ingress_ifindex);
+                        packet_log_debug!(packet, "Handle OK");
+                        packet_log_trace!(packet, "Forwarding to iface {} (ingress={})", iface.idx, ctx.ingress_ifindex());
 
                         bpf_redirect(iface.idx as u32, 0) as u32
                     }
@@ -88,7 +86,7 @@ pub fn xlb(ctx: XdpContext) -> u32 {
             }
             Err(xlb_err) => {
                 let err_str: &'static str = xlb_err.into();
-                warn!(&ctx, "Failed to handle packet: {}", err_str);
+                packet_log_warn!(packet, "Failed to handle packet: {}", err_str);
 
                 xdp_action::XDP_DROP
             }

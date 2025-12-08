@@ -4,16 +4,15 @@ mod r#loop;
 mod provider;
 mod system;
 
-use std::sync::Arc;
 use crate::config::{BackendSource, XlbConfig};
 use crate::provider::{BackendProvider, FixedProvider};
 use crate::r#loop::MaintenanceLoop;
 use anyhow::{anyhow, Context};
 use aya::maps::{Array, HashMap};
 use log::info;
+use std::sync::Arc;
 use std::time::Duration;
-#[rustfmt::skip]
-use tokio::signal;
+use tokio::signal::unix::{signal, SignalKind};
 use xlb_common::types::{Backend, Flow};
 
 #[tokio::main]
@@ -65,10 +64,16 @@ async fn main() -> anyhow::Result<()> {
 
     let loop_handle = maint_loop.start(Duration::from_secs(1));
 
-    let ctrl_c = signal::ctrl_c();
-    info!("Waiting for Ctrl-C...");
+    let mut sigterm = signal(SignalKind::terminate())?;
+    let mut sigint = signal(SignalKind::interrupt())?;
 
-    ctrl_c.await?;
+    info!("Waiting for shutdown signal...");
+
+    tokio::select! {
+        _ = sigterm.recv() => info!("Received SIGTERM"),
+        _ = sigint.recv() => info!("Received SIGINT"),
+    }
+
     info!("Beginning graceful shutdown...");
 
     loop_handle.stop();

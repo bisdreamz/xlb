@@ -75,13 +75,14 @@ pub fn load_ebpf_program(config: &XlbConfig, iface: &ListenIface) -> Result<Ebpf
     // Skip bridges because we can't attach to both a bridge and its veth members
     // We want the veth pairs to catch return traffic from containers
     let interfaces = default_net::get_interfaces();
-    let skip_prefixes = ["lo"];
-    let skip_bridges = ["docker0", "br-", "virbr"];
+    let skip_prefixes = ["lo", "cilium", "lxc", "anchor", "cpbridge"];
+    let skip_bridges = ["docker0", "virbr"];
 
     for interface in interfaces {
         // Skip loopback and bridge interfaces
         if skip_prefixes.iter().any(|prefix| interface.name.starts_with(prefix))
             || skip_bridges.iter().any(|prefix| interface.name.starts_with(prefix)) {
+            info!("Skipping interface {} (loopback, bridge, or veth)", interface.name);
             continue;
         }
 

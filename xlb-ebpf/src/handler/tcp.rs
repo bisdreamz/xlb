@@ -4,9 +4,9 @@ use crate::handler::types::PacketFlow;
 use crate::handler::utils;
 use crate::net::packet::Packet;
 use crate::net::types::ProtoHeader;
+use crate::{packet_log_debug, packet_log_trace, packet_log_warn};
 use aya_ebpf::helpers::bpf_get_prandom_u32;
 use aya_ebpf::maps::{Array, HashMap};
-use aya_log_ebpf::{debug, info};
 use xlb_common::config::ebpf::Strategy;
 use xlb_common::types::{Backend, Flow, FlowDirection, FlowKey};
 use xlb_common::XlbErr;
@@ -33,22 +33,22 @@ pub fn handle_tcp_packet(packet: &mut Packet,
                          backends: &'static Array<Backend>,
                          flow_map: &'static HashMap<u64, Flow>,
                          strategy: &Strategy,
-                         port_map_dest: u16) -> Result<PacketFlow, XlbErr> {
+                         port_map_dest: u16) -> Result<Option<PacketFlow>, XlbErr> {
     let tcp = match packet.proto_hdr() {
         ProtoHeader::Tcp(tcp) => tcp,
         _ => unsafe { core::hint::unreachable_unchecked() },
     };
 
     if tcp.is_syn() && *direction == FlowDirection::ToServer {
-        info!(packet.xdp_context(), "New TCP SYN");
+        packet_log_debug!(packet, "New TCP SYN");
         let next_backend = balancing::select_backend(strategy, backends)
             .ok_or(XlbErr::ErrNoBackends)?;
 
-        return new_flow(packet, &next_backend, port_map_dest, flow_map);
+        return Ok(Some(new_flow(packet, &next_backend, port_map_dest, flow_map)?));
     }
 
     if tcp.is_fin() || tcp.is_rst() {
-        info!(packet.xdp_context(), "TCP FIN/RST");
+        packet_log_debug!(packet, "TCP FIN/RST");
         // record flow state but continue to process
         close_flow(packet, direction, flow_map)?;
     }
@@ -60,14 +60,24 @@ fn close_flow(packet: &Packet, direction: &FlowDirection, flow_map: &'static Has
     let flow_key = utils::get_flow_key(packet, direction);
     let key_hash = flow_key.hash_key();
 
-    let flow_ptr = flow_map.get_ptr_mut(&key_hash)
-        .ok_or(XlbErr::ErrOrphanedFlow)?;
+    let Some(flow_ptr) = flow_map.get_ptr_mut(&key_hash) else {
+        if *direction == FlowDirection::ToServer {
+            packet_log_debug!(packet, "Orphaned flow but FIN/RST anyway");
+        }
+
+        return Ok(())
+    };
+
     let flow = unsafe { &mut *flow_ptr };
 
     flow.closed_at_ns = utils::monotonic_time_ns();
 
-    let counter_flow_ptr = flow_map.get_ptr_mut(&flow.counter_flow_key_hash)
-        .ok_or(XlbErr::ErrOrphanedFlow)?;
+    let Some(counter_flow_ptr) = flow_map.get_ptr_mut(&flow.counter_flow_key_hash) else {
+        packet_log_warn!(packet, "Flow exists but counter-flow missing. OKing for safety anyway!");
+
+        return Ok(())
+    };
+
     let counter_flow = unsafe { &mut *counter_flow_ptr };
 
     counter_flow.closed_at_ns = utils::monotonic_time_ns();
@@ -80,22 +90,30 @@ fn close_flow(packet: &Packet, direction: &FlowDirection, flow_map: &'static Has
 /// does not have the syn flag set, thus should be part
 /// of an active load balancing connection
 fn existing_flow(packet: &mut Packet, direction: &FlowDirection,
-                 flow_map: &'static HashMap<u64, Flow>) -> Result<PacketFlow, XlbErr> {
+                 flow_map: &'static HashMap<u64, Flow>) -> Result<Option<PacketFlow>, XlbErr> {
     let flow_key = utils::get_flow_key(packet, direction);
     let key_hash = flow_key.hash_key();
 
-    debug!(packet.xdp_context(), "Look4flow key {:i}:{}", flow_key.ip as u32, flow_key.port);
+    packet_log_trace!(packet, "Look4flow");
 
-    let flow_ptr = flow_map.get_ptr_mut(&key_hash).ok_or(XlbErr::ErrOrphanedFlow)?;
+    let flow_ptr = match flow_map.get_ptr_mut(&key_hash) {
+        Some(ptr) => ptr,
+        None => {
+            if *direction == FlowDirection::ToClient {
+                return Ok(None);
+            }
+            return Err(XlbErr::ErrOrphanedFlow);
+        }
+    };
     let flow = unsafe { &mut *flow_ptr };
 
-    debug!(packet.xdp_context(), "Recognized flow {:i}:{}", flow_key.ip as u32, flow_key.port);
+    packet_log_trace!(packet, "Recognized flow");
 
     flow.bytes_transfer += packet.size();
     flow.packets_transfer += 1;
     flow.last_seen_ns = utils::monotonic_time_ns();
 
-    Ok(PacketFlow {
+    Ok(Some(PacketFlow {
         iface: utils::flow_to_iface(flow),
         src_mac: flow.src_mac,
         dst_mac: flow.dst_mac,
@@ -103,7 +121,7 @@ fn existing_flow(packet: &mut Packet, direction: &FlowDirection,
         dst_ip: flow.dst_ip,
         src_port: flow.src_port,
         dst_port: flow.dst_port,
-    })
+    }))
 }
 
 /// Makes 5 attempts to locate a free ephemeral
@@ -163,7 +181,7 @@ fn new_flow(packet: &mut Packet, backend: &Backend, dest_map_port: u16,
             dst_port: server_flow.dst_port,
         };
 
-        debug!(packet.xdp_context(), "Insert client flow {:i}:{}", client_key.ip as u32, client_key.port);
+        packet_log_debug!(packet, "Insert client flow");
 
         flow_map.insert(&server_key_hash, &server_flow, 0)
             .map_err(|_| XlbErr::ErrMapInsertFailed)?;

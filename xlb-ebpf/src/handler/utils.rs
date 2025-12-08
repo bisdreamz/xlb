@@ -4,20 +4,35 @@ use aya_ebpf::helpers::bpf_ktime_get_ns;
 use xlb_common::config::ebpf::EbpfConfig;
 use xlb_common::types::{Flow, FlowDirection, FlowKey, PortMapping};
 
-/// True if packet matches configured IP version and protocol
-pub fn matches_ipver_and_proto(packet: &Packet, config: &EbpfConfig) -> bool {
-    packet.ip_version() == config.ip_ver && packet.proto() == config.proto
+/// Checks whether a packet is of interest to this XDP instance.
+/// We only care about packets that match our IP version, protocol, and port mappings.
+/// For incoming traffic (ToServer), we also verify it's actually destined for our configured
+/// listen IP - otherwise it's for some other service and we pass it through
+pub fn should_process_packet(config: &EbpfConfig, packet: &Packet)
+    -> Option<(FlowDirection, PortMapping)> {
+
+    if packet.ip_version() != config.ip_ver || packet.proto() != config.proto {
+        return None;
+    }
+
+    let (direction, port_map) = get_direction_port_map(config, packet)?;
+
+    if direction == FlowDirection::ToServer && packet.dst_ip() != config.ip_addr {
+        return None;
+    }
+
+    Some((direction, port_map))
 }
 
 #[inline(always)]
-pub fn get_direction_port_map(config: &'_ EbpfConfig, packet: &Packet)
+fn get_direction_port_map(config: &'_ EbpfConfig, packet: &Packet)
     -> Option<(FlowDirection, PortMapping)>{
     let src_port = packet.src_port();
     let dst_port = packet.dst_port();
 
     for i in 0..config.port_mappings.len() {
         let port_map = config.port_mappings[i];
-        
+
         if dst_port == port_map.local_port {
             return Some((FlowDirection::ToServer, port_map));
         }

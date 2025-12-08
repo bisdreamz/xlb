@@ -6,6 +6,47 @@ use aya_log_ebpf::info;
 use xlb_common::net::{IpVersion, Proto};
 use xlb_common::XlbErr;
 
+/// Macros for packet logging with compile-time optimization
+/// debug/trace logs are compiled out in release builds (zero overhead)
+/// info/warn/error logs are always included
+
+#[macro_export]
+macro_rules! packet_log_trace {
+    ($packet:expr, $($arg:tt)*) => {
+        #[cfg(debug_assertions)]
+        ::aya_log_ebpf::trace!($packet.xdp_context(), $($arg)*);
+    };
+}
+
+#[macro_export]
+macro_rules! packet_log_debug {
+    ($packet:expr, $($arg:tt)*) => {
+        #[cfg(debug_assertions)]
+        ::aya_log_ebpf::debug!($packet.xdp_context(), $($arg)*);
+    };
+}
+
+#[macro_export]
+macro_rules! packet_log_info {
+    ($packet:expr, $($arg:tt)*) => {
+        ::aya_log_ebpf::info!($packet.xdp_context(), $($arg)*);
+    };
+}
+
+#[macro_export]
+macro_rules! packet_log_warn {
+    ($packet:expr, $($arg:tt)*) => {
+        ::aya_log_ebpf::warn!($packet.xdp_context(), $($arg)*);
+    };
+}
+
+#[macro_export]
+macro_rules! packet_log_error {
+    ($packet:expr, $($arg:tt)*) => {
+        ::aya_log_ebpf::error!($packet.xdp_context(), $($arg)*);
+    };
+}
+
 pub struct Packet<'a> {
     ctx: &'a XdpContext,
     eth_hdr: EthHeader<'a>,

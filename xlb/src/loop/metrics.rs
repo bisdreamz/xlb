@@ -16,6 +16,8 @@ pub struct Metrics {
     pub closed_fin_by_server: u32,
     pub closed_rsts_by_client: u32,
     pub closed_rsts_by_server: u32,
+    /// Orphaned connections cleaned up (idle timeout)
+    pub orphaned_conns: u32,
     /// Total bytes transferred since last poll
     pub bytes_transfer: u64,
     /// Total packets transferred since last poll

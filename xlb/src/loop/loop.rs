@@ -1,15 +1,15 @@
 use crate::provider::{hosts_to_backends_with_routes, BackendProvider};
+use crate::r#loop::metrics::Metrics;
 use crate::r#loop::utils;
 use crate::r#loop::utils::LbFlowStats;
 use aya::maps::{Array, HashMap, MapData};
-use log::{trace, info};
+use log::{info, trace};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tokio::time::interval;
 use xlb_common::consts;
 use xlb_common::types::{Backend, Flow};
-use crate::r#loop::metrics::Metrics;
 
 pub struct MaintenanceLoopHandle {
     shutdown: Arc<AtomicBool>,
@@ -29,9 +29,6 @@ pub struct MaintenanceLoop {
     ebpf_backends: Array<MapData, Backend>,
     /// Live map of connection flows, see ['Flow']
     ebpf_flows: HashMap<MapData, u64, Flow>,
-    /// Snapshots of prior loop backen states for
-    /// stats delta calculations
-    prev_stats: LbFlowStats,
     /// If a flow is active longer than this TTL it is considered
     /// to be an orpaned connection (closed w/o fin or rst)
     #[allow(dead_code)]
@@ -40,6 +37,10 @@ pub struct MaintenanceLoop {
     /// used as a filter for identifying recent events
     /// such as new conns or closures
     last_run_ns: u64,
+    /// Per-flow tracking for delta calculations: flow_key -> (bytes, packets)
+    /// Prevents underflow when flows are deleted and avoids improper
+    /// reported bandwidth dips during connection closures
+    prev_flow_stats: std::collections::HashMap<u64, (u64, u64)>,
 }
 
 impl MaintenanceLoop {
@@ -54,24 +55,25 @@ impl MaintenanceLoop {
             provider,
             ebpf_backends,
             ebpf_flows,
-            prev_stats: LbFlowStats::default(),
             orphan_ttl,
             last_run_ns: 0,
+            prev_flow_stats: std::collections::HashMap::new(),
         }
     }
 
     async fn run(&mut self) {
-        let stats = utils::aggregate_flow_stats(
+        let now_ns = utils::monotonic_now_ns();
+        let (stats, new_prev_flow_stats) = utils::aggregate_flow_stats(
             self.last_run_ns,
-            self.ebpf_flows
-                .iter()
-                .flatten()
+            self.ebpf_flows.iter().flatten(),
+            &self.prev_flow_stats,
+            self.orphan_ttl.as_secs(),
+            now_ns,
         );
 
-        let deltas = utils::calc_aggregate_deltas(&self.prev_stats, &stats);
-        self.prev_stats = stats;
+        log_pretty_stats(&stats);
 
-        log_pretty_stats(&deltas);
+        self.prev_flow_stats = new_prev_flow_stats;
 
         let new_hosts = self.provider.get_backends();
         let new_backends = hosts_to_backends_with_routes(&new_hosts).await;
@@ -88,9 +90,9 @@ impl MaintenanceLoop {
         }
         trace!("Updated {} backends", new_backends.len());
 
-        prune_orphaned_or_closed(&mut self.ebpf_flows);
+        prune_orphaned_or_closed(&mut self.ebpf_flows, now_ns, self.orphan_ttl.as_secs());
 
-        self.last_run_ns = utils::monotonic_now_ns();
+        self.last_run_ns = now_ns;
     }
 
     pub fn start(mut self, tick: Duration) -> MaintenanceLoopHandle {
@@ -122,9 +124,11 @@ impl MaintenanceLoop {
     }
 }
 
-fn prune_orphaned_or_closed(flow_map: &mut HashMap<MapData, u64, Flow>) {
+fn prune_orphaned_or_closed(flow_map: &mut HashMap<MapData, u64, Flow>,
+                            now_ns: u64, orphan_ttl_secs: u64) {
     let mut fins = 0;
     let mut rsts = 0;
+    let mut orphans = 0;
 
     let keys_to_delete: Vec<u64> = flow_map
         .iter()
@@ -136,7 +140,9 @@ fn prune_orphaned_or_closed(flow_map: &mut HashMap<MapData, u64, Flow>) {
                 } else if flow.rst_is_src {
                     rsts += 1;
                 }
-
+                Some(key)
+            } else if utils::is_orphan(flow.last_seen_ns, now_ns, orphan_ttl_secs) {
+                orphans += 1;
                 Some(key)
             } else {
                 None
@@ -148,8 +154,8 @@ fn prune_orphaned_or_closed(flow_map: &mut HashMap<MapData, u64, Flow>) {
         let _ = flow_map.remove(key);
     }
 
-    trace!("Cleaned up {} closed connections (fin={} rst={})",
-        keys_to_delete.len() / 2, fins, rsts);
+    trace!("Cleaned up {} flows (fin={} rst={} orphans={})",
+        keys_to_delete.len() / 2, fins, rsts, orphans / 2);
 }
 
 fn format_pretty_metrics(metrics: &Metrics) -> String {
@@ -162,9 +168,9 @@ fn format_pretty_metrics(metrics: &Metrics) -> String {
     let total_rst = metrics.closed_rsts_by_client + metrics.closed_rsts_by_server;
 
     format!(
-        "pps={} mbps={:.2} active={} new={} closed={} (fin={} rst={})",
+        "pps={} mbps={:.2} active={} new={} closed={} (fin={} rst={} orphans={})",
         pps, mbps, metrics.active_conns, metrics.new_conns,
-        total_closed, total_fin, total_rst
+        total_closed, total_fin, total_rst, metrics.orphaned_conns
     )
 }
 

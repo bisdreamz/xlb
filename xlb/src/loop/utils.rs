@@ -1,5 +1,6 @@
 use crate::r#loop::metrics::Metrics;
 use std::collections::{HashMap, HashSet};
+use std::time::Duration;
 use xlb_common::types::FlowDirection::ToClient;
 use xlb_common::types::{Flow, FlowDirection};
 
@@ -28,111 +29,103 @@ impl AggregateFlowStats {
     }
 }
 
-fn add_flow_stats(flow: &Flow, metrics: &mut Metrics, direction: &FlowDirection, event_ns: u64) {
-    if flow.created_at_ns > event_ns {
+fn add_flow_stats(flow: &Flow, metrics: &mut Metrics, direction: &FlowDirection, event_ns: u64,
+                  orphan_ttl_secs: u64, now_ns: u64) {
+    let is_new = flow.created_at_ns > event_ns;
+    let is_closed = flow.fin_both_sides_closed || flow.rst;
+    let is_orphaned = is_orphan(flow.last_seen_ns, now_ns, orphan_ttl_secs);
+
+    if is_new {
         metrics.new_conns += 1;
-    } else if flow.fin_ns > event_ns && flow.fin_is_src {
+    }
+
+    if flow.fin_both_sides_closed && flow.fin_is_src {
         match direction {
             ToClient => metrics.closed_fin_by_server += 1,
             FlowDirection::ToServer => metrics.closed_fin_by_client += 1,
         }
-
-        if flow.fin_both_sides_closed {
-            metrics.closed_total_conns += 1;
-        }
-    } else if flow.rst {
+        metrics.closed_total_conns += 1;
+    } else if flow.rst && flow.rst_is_src {
         match direction {
             ToClient => metrics.closed_rsts_by_server += 1,
             FlowDirection::ToServer => metrics.closed_rsts_by_client += 1,
         }
-
         metrics.closed_total_conns += 1;
-    } else {
-        metrics.active_conns += 1;
+    } else if is_orphaned {
+        metrics.orphaned_conns += 1;
     }
 
-    metrics.bytes_transfer += flow.bytes_transfer;
-    metrics.packets_transfer += flow.packets_transfer;
+    if !is_new && !is_closed && !is_orphaned {
+        metrics.active_conns += 1;
+    }
 }
 
-/// Aggregates stats for inbound requests (ToServer)
-/// by backend and total
-/// Returns (totals, mapped per backend ip) tuple
 pub fn aggregate_flow_stats<'a>(
     event_ns: u64,
     flows: impl Iterator<Item = (u64, Flow)>,
-) -> LbFlowStats {
+    prev_flow_stats: &HashMap<u64, (u64, u64)>,
+    orphan_ttl_secs: u64,
+    now_ns: u64,
+) -> (LbFlowStats, HashMap<u64, (u64, u64)>) {
     let mut backends_map = HashMap::new();
     let mut totals = AggregateFlowStats::default();
+    let mut new_prev_flow_stats = HashMap::new();
 
-    for (_, flow) in flows {
+    for (key, flow) in flows {
+        let (prev_bytes, prev_packets) = prev_flow_stats.get(&key).copied().unwrap_or((0, 0));
+        let delta_bytes = flow.bytes_transfer.saturating_sub(prev_bytes);
+        let delta_packets = flow.packets_transfer.saturating_sub(prev_packets);
+
+        new_prev_flow_stats.insert(key, (flow.bytes_transfer, flow.packets_transfer));
+
         let backend = backends_map
             .entry(flow.backend_ip)
             .or_insert_with(|| AggregateFlowStats::default());
 
+        let is_new = flow.created_at_ns > event_ns;
+        let is_closed = flow.fin_both_sides_closed || flow.rst;
+        let is_orphaned = is_orphan(flow.last_seen_ns, now_ns, orphan_ttl_secs);
+        let is_active = !is_new && !is_closed && !is_orphaned;
+
         if flow.direction == ToClient {
-            add_flow_stats(&flow, &mut totals.to_client, &flow.direction, event_ns);
-            add_flow_stats(&flow, &mut backend.to_client, &flow.direction, event_ns);
+            add_flow_stats(&flow, &mut totals.to_client, &flow.direction, event_ns, orphan_ttl_secs, now_ns);
+            add_flow_stats(&flow, &mut backend.to_client, &flow.direction, event_ns, orphan_ttl_secs, now_ns);
+
+            totals.to_client.bytes_transfer += delta_bytes;
+            totals.to_client.packets_transfer += delta_packets;
+            backend.to_client.bytes_transfer += delta_bytes;
+            backend.to_client.packets_transfer += delta_packets;
 
             continue;
         }
 
-        add_flow_stats(&flow, &mut totals.to_server, &flow.direction, event_ns);
-        add_flow_stats(&flow, &mut backend.to_server, &flow.direction, event_ns);
+        add_flow_stats(&flow, &mut totals.to_server, &flow.direction, event_ns, orphan_ttl_secs, now_ns);
+        add_flow_stats(&flow, &mut backend.to_server, &flow.direction, event_ns, orphan_ttl_secs, now_ns);
 
-        totals.add_client(flow.client_ip);
-        backend.add_client(flow.client_ip);
+        totals.to_server.bytes_transfer += delta_bytes;
+        totals.to_server.packets_transfer += delta_packets;
+        backend.to_server.bytes_transfer += delta_bytes;
+        backend.to_server.packets_transfer += delta_packets;
+
+        if is_active {
+            totals.add_client(flow.client_ip);
+            backend.add_client(flow.client_ip);
+        }
     }
 
-    LbFlowStats {
-        totals,
-        backends: backends_map
+    totals.to_server.active_clients = totals.client_set.len() as u32;
+    totals.to_client.active_clients = totals.client_set.len() as u32;
+
+    for backend in backends_map.values_mut() {
+        backend.to_server.active_clients = backend.client_set.len() as u32;
+        backend.to_client.active_clients = backend.client_set.len() as u32;
     }
+
+    (LbFlowStats { totals, backends: backends_map }, new_prev_flow_stats)
 }
 
-/// Returns a new Metrics object which
-/// retains the total metrics (conns) but
-/// calculates deltas for curr-prev for the
-/// transfer metrics
-fn merge_metrics_calc_deltas(prev: &Metrics, curr: &Metrics) -> Metrics {
-    let mut deltas = Metrics::default();
-
-    deltas.active_conns = curr.active_clients;
-    deltas.new_conns = curr.new_conns;
-    deltas.closed_total_conns = curr.closed_total_conns;
-    deltas.closed_fin_by_client = curr.closed_fin_by_client;
-    deltas.closed_fin_by_server = curr.closed_fin_by_server;
-    deltas.closed_rsts_by_client = curr.closed_rsts_by_client;
-    deltas.closed_rsts_by_server = curr.closed_rsts_by_server;
-
-    deltas.bytes_transfer = curr.bytes_transfer.saturating_sub(prev.bytes_transfer);
-    deltas.packets_transfer = curr.packets_transfer.saturating_sub(prev.packets_transfer);
-
-    deltas
-}
-
-pub fn calc_aggregate_deltas(prev: &LbFlowStats, curr: &LbFlowStats) -> LbFlowStats {
-    let mut deltas = LbFlowStats::default();
-
-    deltas.totals.client_set = curr.totals.client_set.clone();
-    deltas.totals.to_server = merge_metrics_calc_deltas(&prev.totals.to_server, &curr.totals.to_server);
-    deltas.totals.to_client = merge_metrics_calc_deltas(&prev.totals.to_client, &curr.totals.to_client);
-
-    let empty_backend = AggregateFlowStats::default();
-    for (backend_ip, curr_backend) in curr.backends.iter() {
-        let prev_backend = prev.backends.get(backend_ip)
-            .unwrap_or(&empty_backend);
-
-        let mut delta_backend = AggregateFlowStats::default();
-
-        delta_backend.client_set = curr_backend.client_set.clone();
-        delta_backend.to_server = merge_metrics_calc_deltas(&prev_backend.to_server, &curr_backend.to_server);
-        delta_backend.to_client = merge_metrics_calc_deltas(&prev_backend.to_client, &curr_backend.to_client);
-
-        deltas.backends.insert(*backend_ip, delta_backend);
-    }
-
-    deltas
+pub fn is_orphan(last_seen_ns: u64, now_ns: u64, orphan_ttl_secs: u64) -> bool {
+    Duration::from_nanos(now_ns.saturating_sub(last_seen_ns)).as_secs() > orphan_ttl_secs
 }
 
 /// Gets the current monotonic timestamp in nanoseconds,

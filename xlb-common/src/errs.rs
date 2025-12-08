@@ -27,5 +27,5 @@ pub enum XlbErr {
     /// Failed to insert flow into map
     ErrMapInsertFailed,
     /// Unable to find available ephemeral port
-    ErrNoEphemeralPorts
+    ErrNoEphemeralPorts,
 }

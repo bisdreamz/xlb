@@ -1,5 +1,5 @@
 use crate::provider::{BackendProvider, Host};
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
 use futures::StreamExt;
 use k8s_openapi::api::core::v1::{Pod, Service};
@@ -34,7 +34,9 @@ impl KubernetesProvider {
             .as_ref()
             .and_then(|s| s.conditions.as_ref())
             .map(|conditions| {
-                conditions.iter().any(|c| c.type_ == "Ready" && c.status == "True")
+                conditions
+                    .iter()
+                    .any(|c| c.type_ == "Ready" && c.status == "True")
             })
             .unwrap_or(false)
     }
@@ -50,20 +52,28 @@ impl KubernetesProvider {
 #[async_trait]
 impl BackendProvider for KubernetesProvider {
     async fn start(&self) -> Result<()> {
-        let client = Client::try_default().await
-            .context("Failed to create Kubernetes client - ensure running in cluster or kubeconfig is set")?;
+        let client = Client::try_default().await.context(
+            "Failed to create Kubernetes client - ensure running in cluster or kubeconfig is set",
+        )?;
 
         // Fetch the Service to get its selector
         let service_api: Api<Service> = Api::namespaced(client.clone(), &self.namespace);
-        let svc = service_api.get(&self.service).await
-            .context(format!("Failed to get service {}/{}", self.namespace, self.service))?;
+        let svc = service_api.get(&self.service).await.context(format!(
+            "Failed to get service {}/{}",
+            self.namespace, self.service
+        ))?;
 
-        let selector = svc.spec
-            .and_then(|spec| spec.selector)
-            .context(format!("Service {}/{} has no selector", self.namespace, self.service))?;
+        let selector = svc.spec.and_then(|spec| spec.selector).context(format!(
+            "Service {}/{} has no selector",
+            self.namespace, self.service
+        ))?;
 
         if selector.is_empty() {
-            bail!("Service {}/{} has empty selector", self.namespace, self.service);
+            bail!(
+                "Service {}/{} has empty selector",
+                self.namespace,
+                self.service
+            );
         }
 
         // Build label selector string
@@ -73,8 +83,10 @@ impl BackendProvider for KubernetesProvider {
             .collect::<Vec<_>>()
             .join(",");
 
-        info!("Watching pods with selector '{}' for service {}/{}",
-              label_selector, self.namespace, self.service);
+        info!(
+            "Watching pods with selector '{}' for service {}/{}",
+            label_selector, self.namespace, self.service
+        );
 
         let pods_api: Api<Pod> = Api::namespaced(client, &self.namespace);
 
@@ -84,7 +96,8 @@ impl BackendProvider for KubernetesProvider {
         let service = self.service.clone();
 
         let handle = tokio::spawn(async move {
-            let watch = watcher::watcher(pods_api, watcher::Config::default().labels(&label_selector));
+            let watch =
+                watcher::watcher(pods_api, watcher::Config::default().labels(&label_selector));
             futures::pin_mut!(watch);
 
             while let Some(event) = watch.next().await {
@@ -99,15 +112,28 @@ impl BackendProvider for KubernetesProvider {
                                     // Add if not already present
                                     if !backend_list.contains(&host) {
                                         backend_list.push(host.clone());
-                                        info!("Added backend: {} ({}) for service {}/{} (total: {})",
-                                              host.name, host.ip, namespace, service, backend_list.len());
+                                        info!(
+                                            "Added backend: {} ({}) for service {}/{} (total: {})",
+                                            host.name,
+                                            host.ip,
+                                            namespace,
+                                            service,
+                                            backend_list.len()
+                                        );
                                     }
                                 } else {
                                     // Remove if present (pod went from ready to not ready)
-                                    if let Some(pos) = backend_list.iter().position(|h| h == &host) {
+                                    if let Some(pos) = backend_list.iter().position(|h| h == &host)
+                                    {
                                         backend_list.remove(pos);
-                                        info!("Removed backend: {} ({}) for service {}/{} (total: {})",
-                                              host.name, host.ip, namespace, service, backend_list.len());
+                                        info!(
+                                            "Removed backend: {} ({}) for service {}/{} (total: {})",
+                                            host.name,
+                                            host.ip,
+                                            namespace,
+                                            service,
+                                            backend_list.len()
+                                        );
                                     }
                                 }
                             }
@@ -115,27 +141,44 @@ impl BackendProvider for KubernetesProvider {
                         Event::Delete(pod) => {
                             if let Some(pod_name) = &pod.metadata.name {
                                 let mut backend_list = backends.write().unwrap();
-                                if let Some(pos) = backend_list.iter().position(|h| &h.name == pod_name) {
+                                if let Some(pos) =
+                                    backend_list.iter().position(|h| &h.name == pod_name)
+                                {
                                     let removed = backend_list.remove(pos);
-                                    info!("Removed backend: {} ({}) for service {}/{} (total: {})",
-                                          removed.name, removed.ip, namespace, service, backend_list.len());
+                                    info!(
+                                        "Removed backend: {} ({}) for service {}/{} (total: {})",
+                                        removed.name,
+                                        removed.ip,
+                                        namespace,
+                                        service,
+                                        backend_list.len()
+                                    );
                                 }
                             }
                         }
                         Event::Init => {}
                         Event::InitDone => {
-                            debug!("Initial pod sync complete for service {}/{}", namespace, service);
+                            debug!(
+                                "Initial pod sync complete for service {}/{}",
+                                namespace, service
+                            );
                         }
-                    }
+                    },
                     Err(e) => {
-                        warn!("Pod watch error for service {}/{}: {}", namespace, service, e);
+                        warn!(
+                            "Pod watch error for service {}/{}: {}",
+                            namespace, service, e
+                        );
                     }
                 }
             }
         });
 
         *self.watch_handle.write().unwrap() = Some(handle);
-        info!("Started Kubernetes provider watching pods for {}/{}", self.namespace, self.service);
+        info!(
+            "Started Kubernetes provider watching pods for {}/{}",
+            self.namespace, self.service
+        );
         Ok(())
     }
 
@@ -146,7 +189,10 @@ impl BackendProvider for KubernetesProvider {
     async fn shutdown(&self) -> Result<()> {
         if let Some(handle) = self.watch_handle.write().unwrap().take() {
             handle.abort();
-            info!("Stopped Kubernetes provider watch for {}/{}", self.namespace, self.service);
+            info!(
+                "Stopped Kubernetes provider watch for {}/{}",
+                self.namespace, self.service
+            );
         }
         Ok(())
     }

@@ -7,9 +7,9 @@ use crate::net::types::ProtoHeader;
 use crate::{packet_log_debug, packet_log_trace, packet_log_warn};
 use aya_ebpf::helpers::bpf_get_prandom_u32;
 use aya_ebpf::maps::{Array, HashMap};
+use xlb_common::XlbErr;
 use xlb_common::config::ebpf::Strategy;
 use xlb_common::types::{Backend, Flow, FlowDirection, FlowKey};
-use xlb_common::XlbErr;
 
 /// Process load balancing of a TCP packet, which
 /// handles required rewriting and backend selection
@@ -28,12 +28,14 @@ use xlb_common::XlbErr;
 /// port when forwarding to the backend,
 /// e.g. lb service port may be 80 to the client but
 /// dest map port is 8080 on the backend.
-pub fn handle_tcp_packet(packet: &mut Packet,
-                         direction: &FlowDirection,
-                         backends: &'static Array<Backend>,
-                         flow_map: &'static HashMap<u64, Flow>,
-                         strategy: &Strategy,
-                         port_map_dest: u16) -> Result<Option<PacketFlow>, XlbErr> {
+pub fn handle_tcp_packet(
+    packet: &mut Packet,
+    direction: &FlowDirection,
+    backends: &'static Array<Backend>,
+    flow_map: &'static HashMap<u64, Flow>,
+    strategy: &Strategy,
+    port_map_dest: u16,
+) -> Result<Option<PacketFlow>, XlbErr> {
     let tcp = match packet.proto_hdr() {
         ProtoHeader::Tcp(tcp) => tcp,
         _ => unsafe { core::hint::unreachable_unchecked() },
@@ -41,10 +43,15 @@ pub fn handle_tcp_packet(packet: &mut Packet,
 
     if tcp.is_syn() && *direction == FlowDirection::ToServer {
         packet_log_debug!(packet, "New TCP SYN");
-        let next_backend = balancing::select_backend(strategy, backends)
-            .ok_or(XlbErr::ErrNoBackends)?;
+        let next_backend =
+            balancing::select_backend(strategy, backends).ok_or(XlbErr::ErrNoBackends)?;
 
-        return Ok(Some(new_flow(packet, &next_backend, port_map_dest, flow_map)?));
+        return Ok(Some(new_flow(
+            packet,
+            &next_backend,
+            port_map_dest,
+            flow_map,
+        )?));
     }
 
     let (tcp_fin, tcp_rst) = (tcp.is_fin(), tcp.is_rst());
@@ -56,7 +63,13 @@ pub fn handle_tcp_packet(packet: &mut Packet,
     existing_flow(packet, direction, flow_map)
 }
 
-fn close_flow(packet: &Packet, direction: &FlowDirection, fin: bool, rst: bool, flow_map: &'static HashMap<u64, Flow>) -> Result<(), XlbErr> {
+fn close_flow(
+    packet: &Packet,
+    direction: &FlowDirection,
+    fin: bool,
+    rst: bool,
+    flow_map: &'static HashMap<u64, Flow>,
+) -> Result<(), XlbErr> {
     let flow_key = utils::get_flow_key(packet, direction);
     let key_hash = flow_key.hash_key();
 
@@ -65,7 +78,7 @@ fn close_flow(packet: &Packet, direction: &FlowDirection, fin: bool, rst: bool, 
             packet_log_debug!(packet, "Orphaned flow but FIN/RST anyway");
         }
 
-        return Ok(())
+        return Ok(());
     };
 
     let flow = unsafe { &mut *flow_ptr };
@@ -83,9 +96,12 @@ fn close_flow(packet: &Packet, direction: &FlowDirection, fin: bool, rst: bool, 
     }
 
     let Some(counter_flow_ptr) = flow_map.get_ptr_mut(&flow.counter_flow_key_hash) else {
-        packet_log_warn!(packet, "Flow exists but counter-flow missing. OKing for safety anyway!");
+        packet_log_warn!(
+            packet,
+            "Flow exists but counter-flow missing. OKing for safety anyway!"
+        );
 
-        return Ok(())
+        return Ok(());
     };
 
     let counter_flow = unsafe { &mut *counter_flow_ptr };
@@ -105,8 +121,11 @@ fn close_flow(packet: &Packet, direction: &FlowDirection, fin: bool, rst: bool, 
 /// by a packet which matches interest criteria and is
 /// does not have the syn flag set, thus should be part
 /// of an active load balancing connection
-fn existing_flow(packet: &mut Packet, direction: &FlowDirection,
-                 flow_map: &'static HashMap<u64, Flow>) -> Result<Option<PacketFlow>, XlbErr> {
+fn existing_flow(
+    packet: &mut Packet,
+    direction: &FlowDirection,
+    flow_map: &'static HashMap<u64, Flow>,
+) -> Result<Option<PacketFlow>, XlbErr> {
     let flow_key = utils::get_flow_key(packet, direction);
     let key_hash = flow_key.hash_key();
 
@@ -164,8 +183,12 @@ fn find_ephemeral_port(
 
 /// Flow path for when a new connection arrives (syn)
 /// Creates flow entries using pre-computed routing information from the backend
-fn new_flow(packet: &mut Packet, backend: &Backend, dest_map_port: u16,
-            flow_map: &'static HashMap<u64, Flow>) -> Result<PacketFlow, XlbErr> {
+fn new_flow(
+    packet: &mut Packet,
+    backend: &Backend,
+    dest_map_port: u16,
+    flow_map: &'static HashMap<u64, Flow>,
+) -> Result<PacketFlow, XlbErr> {
     let egress_iface = Iface {
         idx: backend.src_iface_ifindex,
         mac: backend.next_hop_mac,
@@ -182,8 +205,14 @@ fn new_flow(packet: &mut Packet, backend: &Backend, dest_map_port: u16,
         let client_key = find_ephemeral_port(backend, flow_map)?;
         client_key_hash = client_key.hash_key();
 
-        let server_flow = new_flow_to_server(packet, backend, dest_map_port,
-                                             &egress_iface, &client_key, now_ns);
+        let server_flow = new_flow_to_server(
+            packet,
+            backend,
+            dest_map_port,
+            &egress_iface,
+            &client_key,
+            now_ns,
+        );
         server_key_hash = utils::server_flow_key(packet.src_ip(), packet.src_port()).hash_key();
 
         // extract and keep server and client flow off diff stack frames
@@ -199,23 +228,29 @@ fn new_flow(packet: &mut Packet, backend: &Backend, dest_map_port: u16,
 
         packet_log_debug!(packet, "Insert client flow");
 
-        flow_map.insert(&server_key_hash, &server_flow, 0)
+        flow_map
+            .insert(&server_key_hash, &server_flow, 0)
             .map_err(|_| XlbErr::ErrMapInsertFailed)?;
     }
 
-    let client_flow = new_flow_to_client(packet, backend, server_key_hash, packet.dst_ip(), now_ns)?;
+    let client_flow =
+        new_flow_to_client(packet, backend, server_key_hash, packet.dst_ip(), now_ns)?;
 
-    flow_map.insert(&client_key_hash, &client_flow, 0)
+    flow_map
+        .insert(&client_key_hash, &client_flow, 0)
         .map_err(|_| XlbErr::ErrMapInsertFailed)?;
 
     Ok(packet_flow)
 }
 
-fn new_flow_to_server(packet: &mut Packet, backend: &Backend,
-                      dest_map_port:  u16,
-                      egress_iface: &Iface,
-                      client_flow_key: &FlowKey,
-                now_ns: u64) -> Flow {
+fn new_flow_to_server(
+    packet: &mut Packet,
+    backend: &Backend,
+    dest_map_port: u16,
+    egress_iface: &Iface,
+    client_flow_key: &FlowKey,
+    now_ns: u64,
+) -> Flow {
     let to_server = Flow {
         direction: FlowDirection::ToServer,
         client_ip: packet.src_ip(),
@@ -242,9 +277,13 @@ fn new_flow_to_server(packet: &mut Packet, backend: &Backend,
     to_server
 }
 
-fn new_flow_to_client(packet: &mut Packet, backend: &Backend,
-                      counter_flow_key_hash: u64,
-                      ext_src_ip: u128, now_ns: u64) -> Result<Flow, XlbErr> {
+fn new_flow_to_client(
+    packet: &mut Packet,
+    backend: &Backend,
+    counter_flow_key_hash: u64,
+    ext_src_ip: u128,
+    now_ns: u64,
+) -> Result<Flow, XlbErr> {
     Ok(Flow {
         direction: FlowDirection::ToClient,
         client_ip: packet.src_ip(),
@@ -267,6 +306,6 @@ fn new_flow_to_client(packet: &mut Packet, backend: &Backend,
         fin_both_sides_closed: false,
         rst_ns: 0,
         rst_is_src: false,
-        counter_flow_key_hash
+        counter_flow_key_hash,
     })
 }

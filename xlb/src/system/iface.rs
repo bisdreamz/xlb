@@ -1,5 +1,5 @@
 use crate::config::ListenAddr;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use std::net::IpAddr;
 use xlb_common::net::IpVersion;
 

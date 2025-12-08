@@ -1,7 +1,7 @@
-use crate::provider::{hosts_to_backends_with_routes, BackendProvider};
 use crate::r#loop::metrics::Metrics;
 use crate::r#loop::utils;
 use crate::r#loop::utils::LbFlowStats;
+use crate::provider::{BackendProvider, hosts_to_backends_with_routes};
 use aya::maps::{Array, HashMap, MapData};
 use log::{info, trace};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -85,18 +85,25 @@ impl MaintenanceLoop {
         self.prev_flow_stats = new_prev_flow_stats;
 
         for (i, backend) in new_backends.iter().enumerate() {
-            self.ebpf_backends.set(i as u32, backend, 0)
+            self.ebpf_backends
+                .set(i as u32, backend, 0)
                 .expect("Failed to set backend entry");
         }
 
         let empty_backend = Backend::default();
-        for i in new_backends.len() as u32.. consts::MAX_BACKENDS {
-            self.ebpf_backends.set(i, &empty_backend.clone(), 0)
+        for i in new_backends.len() as u32..consts::MAX_BACKENDS {
+            self.ebpf_backends
+                .set(i, &empty_backend.clone(), 0)
                 .expect("Failed to set empty sentinel backend!");
         }
         trace!("Updated {} backends", new_backends.len());
 
-        prune_orphaned_or_closed(&mut self.ebpf_flows, now_ns, self.last_run_ns, self.orphan_ttl.as_secs());
+        prune_orphaned_or_closed(
+            &mut self.ebpf_flows,
+            now_ns,
+            self.last_run_ns,
+            self.orphan_ttl.as_secs(),
+        );
 
         self.last_run_ns = now_ns;
     }
@@ -107,7 +114,8 @@ impl MaintenanceLoop {
         // the prior snapshot to calculate stats deltas. Finally,
         // update the ebpf backends map with the new values
         let shutdown = Arc::new(AtomicBool::new(false));
-        self.shutdown.set(shutdown.clone())
+        self.shutdown
+            .set(shutdown.clone())
             .expect("Failed to set shutdown flag, already started?");
 
         let mut ticker = interval(Duration::from_secs(tick.as_secs()));
@@ -118,9 +126,12 @@ impl MaintenanceLoop {
                 ticker.tick().await;
                 self.run().await;
 
-                if self.shutdown.get()
+                if self
+                    .shutdown
+                    .get()
                     .expect("Failed to get shutdown flag")
-                    .load(Ordering::Relaxed) {
+                    .load(Ordering::Relaxed)
+                {
                     break;
                 }
             }
@@ -130,8 +141,12 @@ impl MaintenanceLoop {
     }
 }
 
-fn prune_orphaned_or_closed(flow_map: &mut HashMap<MapData, u64, Flow>,
-                            now_ns: u64, last_run_ns: u64, orphan_ttl_secs: u64) {
+fn prune_orphaned_or_closed(
+    flow_map: &mut HashMap<MapData, u64, Flow>,
+    now_ns: u64,
+    last_run_ns: u64,
+    orphan_ttl_secs: u64,
+) {
     let mut fins = 0;
     let mut rsts = 0;
     let mut orphans = 0;
@@ -162,32 +177,54 @@ fn prune_orphaned_or_closed(flow_map: &mut HashMap<MapData, u64, Flow>,
         let _ = flow_map.remove(key);
     }
 
-    trace!("Cleaned up {} flows (fin={} rst={} orphans={})",
-        keys_to_delete.len() / 2, fins, rsts, orphans / 2);
+    trace!(
+        "Cleaned up {} flows (fin={} rst={} orphans={})",
+        keys_to_delete.len() / 2,
+        fins,
+        rsts,
+        orphans / 2
+    );
 }
 
 fn format_pretty_metrics(metrics: &Metrics) -> String {
     let mbps = (metrics.bytes_transfer as f64 * 8.0) / 1_000_000.0;
     let pps = metrics.packets_transfer;
 
-    let total_closed = metrics.closed_fin_by_client + metrics.closed_fin_by_server
-                     + metrics.closed_rsts_by_client + metrics.closed_rsts_by_server;
+    let total_closed = metrics.closed_fin_by_client
+        + metrics.closed_fin_by_server
+        + metrics.closed_rsts_by_client
+        + metrics.closed_rsts_by_server;
     let total_fin = metrics.closed_fin_by_client + metrics.closed_fin_by_server;
     let total_rst = metrics.closed_rsts_by_client + metrics.closed_rsts_by_server;
 
     format!(
         "pps={} mbps={:.2} active={} new={} closed={} (fin={} rst={} orphans={})",
-        pps, mbps, metrics.active_conns, metrics.new_conns,
-        total_closed, total_fin, total_rst, metrics.orphaned_conns
+        pps,
+        mbps,
+        metrics.active_conns,
+        metrics.new_conns,
+        total_closed,
+        total_fin,
+        total_rst,
+        metrics.orphaned_conns
     )
 }
 
 fn log_pretty_stats(stats: &LbFlowStats) {
     info!("Load Balancer Stats:");
-    info!("\tInbound  (ToServer): {}", format_pretty_metrics(&stats.totals.to_server));
-    info!("\tOutbound (ToClient): {}", format_pretty_metrics(&stats.totals.to_client));
-    info!("\tActive Clients: {} | Available Backends: {}",
-          stats.totals.client_set.len(), stats.available_backends);
+    info!(
+        "\tInbound  (ToServer): {}",
+        format_pretty_metrics(&stats.totals.to_server)
+    );
+    info!(
+        "\tOutbound (ToClient): {}",
+        format_pretty_metrics(&stats.totals.to_client)
+    );
+    info!(
+        "\tActive Clients: {} | Available Backends: {}",
+        stats.totals.client_set.len(),
+        stats.available_backends
+    );
 
     if !stats.backends.is_empty() {
         info!("\tPer-Backend:");
@@ -195,8 +232,14 @@ fn log_pretty_stats(stats: &LbFlowStats) {
         for (backend_ip, backend_stats) in stats.backends.iter() {
             let ip_str = utils::format_ip(*backend_ip);
             info!("\t\t{} clients={}", ip_str, backend_stats.client_set.len());
-            info!("\t\t\tRX (Inbound):  {}", format_pretty_metrics(&backend_stats.to_server));
-            info!("\t\t\tTX (Outbound): {}", format_pretty_metrics(&backend_stats.to_client));
+            info!(
+                "\t\t\tRX (Inbound):  {}",
+                format_pretty_metrics(&backend_stats.to_server)
+            );
+            info!(
+                "\t\t\tTX (Outbound): {}",
+                format_pretty_metrics(&backend_stats.to_client)
+            );
         }
     }
 }

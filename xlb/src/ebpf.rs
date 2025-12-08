@@ -1,10 +1,10 @@
 use crate::config::XlbConfig;
 use crate::system::ListenIface;
 use anyhow::{Result, anyhow};
-use aya::{Ebpf, EbpfLoader};
 use aya::maps::Array;
 use aya::programs::{Xdp, XdpFlags};
-use log::{warn, info};
+use aya::{Ebpf, EbpfLoader};
+use log::{info, warn};
 use std::net::IpAddr;
 use xlb_common::config::ebpf::{EbpfConfig, Strategy};
 use xlb_common::types::PortMapping;
@@ -37,11 +37,10 @@ pub fn to_ebpf_config(cfg: &XlbConfig, iface: &ListenIface) -> EbpfConfig {
 pub fn load_ebpf_program(config: &XlbConfig, iface: &ListenIface) -> Result<Ebpf> {
     let ebpf_config = to_ebpf_config(config, iface);
 
-    let mut ebpf = EbpfLoader::new()
-        .load(aya::include_bytes_aligned!(concat!(
-            env!("OUT_DIR"),
-            "/xlb-bpf"
-        )))?;
+    let mut ebpf = EbpfLoader::new().load(aya::include_bytes_aligned!(concat!(
+        env!("OUT_DIR"),
+        "/xlb-bpf"
+    )))?;
 
     {
         let mut config_map: Array<_, EbpfConfig> = ebpf
@@ -80,23 +79,40 @@ pub fn load_ebpf_program(config: &XlbConfig, iface: &ListenIface) -> Result<Ebpf
 
     for interface in interfaces {
         // Skip loopback and bridge interfaces
-        if skip_prefixes.iter().any(|prefix| interface.name.starts_with(prefix))
-            || skip_bridges.iter().any(|prefix| interface.name.starts_with(prefix)) {
-            info!("Skipping interface {} (loopback, bridge, or veth)", interface.name);
+        if skip_prefixes
+            .iter()
+            .any(|prefix| interface.name.starts_with(prefix))
+            || skip_bridges
+                .iter()
+                .any(|prefix| interface.name.starts_with(prefix))
+        {
+            info!(
+                "Skipping interface {} (loopback, bridge, or veth)",
+                interface.name
+            );
             continue;
         }
 
         // Try native XDP first, fallback to SKB mode for veth/virtual interfaces
-        let attach_result = program.attach(&interface.name, XdpFlags::default())
+        let attach_result = program
+            .attach(&interface.name, XdpFlags::default())
             .or_else(|_| program.attach(&interface.name, XdpFlags::SKB_MODE))
-            .or_else(|_| program.attach(&interface.name, XdpFlags::SKB_MODE | XdpFlags::UPDATE_IF_NOEXIST));
+            .or_else(|_| {
+                program.attach(
+                    &interface.name,
+                    XdpFlags::SKB_MODE | XdpFlags::UPDATE_IF_NOEXIST,
+                )
+            });
 
         match attach_result {
             Ok(_) => {
                 info!("XDP ATTACHED successfully to interface: {}", interface.name);
             }
             Err(e) => {
-                warn!("XDP ATTACH FAILED for {}: {} (continuing)", interface.name, e);
+                warn!(
+                    "XDP ATTACH FAILED for {}: {} (continuing)",
+                    interface.name, e
+                );
             }
         }
     }

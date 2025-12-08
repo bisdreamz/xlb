@@ -5,9 +5,9 @@ use crate::net::packet::Packet;
 use crate::net::types::ProtoHeader;
 use crate::packet_log_debug;
 use aya_ebpf::maps::{Array, HashMap};
+use xlb_common::XlbErr;
 use xlb_common::config::ebpf::EbpfConfig;
 use xlb_common::types::{Backend, Flow};
-use xlb_common::XlbErr;
 
 pub enum PacketEvent {
     Pass,
@@ -18,14 +18,16 @@ pub enum PacketEvent {
 pub struct PacketHandler;
 
 impl PacketHandler {
-    pub fn handle(packet: &mut Packet, config: &EbpfConfig,
-                  backends: &'static Array<Backend>,
-                  flow_map: &'static HashMap<u64, Flow>,
-                  shutdown: bool) -> Result<PacketEvent, XlbErr> {
-
+    pub fn handle(
+        packet: &mut Packet,
+        config: &EbpfConfig,
+        backends: &'static Array<Backend>,
+        flow_map: &'static HashMap<u64, Flow>,
+        shutdown: bool,
+    ) -> Result<PacketEvent, XlbErr> {
         let (direction, port_map) = match utils::should_process_packet(config, packet) {
             Some(result) => result,
-            None => return Ok(PacketEvent::Pass)
+            None => return Ok(PacketEvent::Pass),
         };
 
         packet_log_debug!(packet, "Matched {}", Into::<&'static str>::into(direction));
@@ -36,7 +38,7 @@ impl PacketHandler {
                     packet_log_debug!(packet, "Shutting down, attempting to send RST");
                     packet.rst()?;
 
-                    return Ok(PacketEvent::Return)
+                    return Ok(PacketEvent::Return);
                 }
 
                 let packet_flow = match tcp::handle_tcp_packet(
@@ -65,5 +67,4 @@ impl PacketHandler {
             _ => Ok(PacketEvent::Pass),
         }
     }
-
 }

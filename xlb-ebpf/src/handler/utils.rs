@@ -8,9 +8,10 @@ use xlb_common::types::{Flow, FlowDirection, FlowKey, PortMapping};
 /// We only care about packets that match our IP version, protocol, and port mappings.
 /// For incoming traffic (ToServer), we also verify it's actually destined for our configured
 /// listen IP - otherwise it's for some other service and we pass it through
-pub fn should_process_packet(config: &EbpfConfig, packet: &Packet)
-    -> Option<(FlowDirection, PortMapping)> {
-
+pub fn should_process_packet(
+    config: &EbpfConfig,
+    packet: &Packet,
+) -> Option<(FlowDirection, PortMapping)> {
     if packet.ip_version() != config.ip_ver || packet.proto() != config.proto {
         return None;
     }
@@ -25,8 +26,10 @@ pub fn should_process_packet(config: &EbpfConfig, packet: &Packet)
 }
 
 #[inline(always)]
-fn get_direction_port_map(config: &'_ EbpfConfig, packet: &Packet)
-    -> Option<(FlowDirection, PortMapping)>{
+fn get_direction_port_map(
+    config: &'_ EbpfConfig,
+    packet: &Packet,
+) -> Option<(FlowDirection, PortMapping)> {
     let src_port = packet.src_port();
     let dst_port = packet.dst_port();
 
@@ -82,7 +85,6 @@ pub fn client_flow_key(backend_ip: u128, ephemeral_port: u16) -> FlowKey {
 pub fn monotonic_time_ns() -> u64 {
     unsafe { bpf_ktime_get_ns() as u64 }
 }
-
 
 #[inline(always)]
 pub fn flow_to_iface(flow: &Flow) -> Iface {

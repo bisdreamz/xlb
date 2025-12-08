@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use log::warn;
 use std::net::{IpAddr, Ipv4Addr};
 use std::process::Command;
@@ -33,7 +33,10 @@ pub async fn populate_backend_route(backend: &mut Backend) -> Result<()> {
         .output()?;
 
     if !output.status.success() {
-        return Err(anyhow!("ip route get failed: {}", String::from_utf8_lossy(&output.stderr)));
+        return Err(anyhow!(
+            "ip route get failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
     }
 
     let route_output = String::from_utf8_lossy(&output.stdout);
@@ -90,7 +93,8 @@ fn parse_src_ip_from_route(output: &str) -> Result<IpAddr> {
     if let Some(idx) = output.find("src ") {
         let after_src = &output[idx + 4..];
         if let Some(ip_str) = after_src.split_whitespace().next() {
-            return ip_str.parse()
+            return ip_str
+                .parse()
                 .map_err(|e| anyhow!("Failed to parse source IP: {}", e));
         }
     }
@@ -152,7 +156,9 @@ fn get_ifindex(dev_name: &str) -> Result<u32> {
     let output_str = String::from_utf8_lossy(&output.stdout);
 
     if let Some(idx_str) = output_str.split(':').next() {
-        return idx_str.trim().parse()
+        return idx_str
+            .trim()
+            .parse()
             .map_err(|e| anyhow!("Failed to parse ifindex: {}", e));
     }
 
@@ -239,4 +245,3 @@ fn u128_to_ip(val: u128) -> Result<IpAddr> {
         Ok(IpAddr::V6(val.into()))
     }
 }
-

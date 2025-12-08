@@ -1,15 +1,13 @@
-use aya_ebpf::maps::Array;
 use aya_ebpf::macros::map;
-use xlb_common::types::Backend;
+use aya_ebpf::maps::Array;
 use xlb_common::consts;
+use xlb_common::types::Backend;
 
 #[map(name = "RR_COUNTER")]
 static RR_COUNTER: Array<u32> = Array::with_max_entries(1, 0);
 
 pub fn select_backend(backends: &'static Array<Backend>) -> Option<&'static Backend> {
-    let start_idx = RR_COUNTER.get(0)
-        .map(|v| *v)
-        .unwrap_or(0);
+    let start_idx = RR_COUNTER.get(0).map(|v| *v).unwrap_or(0);
 
     // Search up to 64 backends starting from current position
     for offset in 0..64 {

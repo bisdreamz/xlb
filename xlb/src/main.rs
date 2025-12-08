@@ -5,14 +5,14 @@ mod provider;
 mod system;
 
 use crate::config::{BackendSource, XlbConfig};
-use crate::provider::{BackendProvider, FixedProvider, KubernetesProvider};
 use crate::r#loop::MaintenanceLoop;
-use anyhow::{anyhow, Context};
+use crate::provider::{BackendProvider, FixedProvider, KubernetesProvider};
+use anyhow::{Context, anyhow};
 use aya::maps::{Array, HashMap};
 use log::info;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::signal::unix::{signal, SignalKind};
+use tokio::signal::unix::{SignalKind, signal};
 use xlb_common::types::{Backend, Flow};
 
 #[tokio::main]
@@ -28,8 +28,9 @@ async fn main() -> anyhow::Result<()> {
 
     let provider: Arc<dyn BackendProvider> = match &config.provider {
         BackendSource::Static { backends } => Arc::new(FixedProvider::new(backends.clone())),
-        BackendSource::Kubernetes { namespace, service } =>
-            Arc::new(KubernetesProvider::new(namespace.clone(), service.clone())),
+        BackendSource::Kubernetes { namespace, service } => {
+            Arc::new(KubernetesProvider::new(namespace.clone(), service.clone()))
+        }
     };
 
     provider
@@ -37,7 +38,8 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("Failed to start backend provider")?;
 
-    let mut ebpf = ebpf::load_ebpf_program(&config, &iface).context("Failed to load eBPF program")?;
+    let mut ebpf =
+        ebpf::load_ebpf_program(&config, &iface).context("Failed to load eBPF program")?;
 
     info!(
         "Started XLB service ({}) on {} ({:?})",
@@ -59,7 +61,7 @@ async fn main() -> anyhow::Result<()> {
         provider.clone(),
         ebpf_backends,
         ebpf_flows,
-        Duration::from_secs(config.orphan_ttl_secs as u64)
+        Duration::from_secs(config.orphan_ttl_secs as u64),
     );
 
     let loop_handle = maint_loop.start(Duration::from_secs(1));
@@ -78,7 +80,9 @@ async fn main() -> anyhow::Result<()> {
 
     loop_handle.stop();
     info!("Maintenance loop stopped");
-    provider.shutdown().await
+    provider
+        .shutdown()
+        .await
         .context("Failed to shutdown backend provider")?;
     info!("Backend provider shutdown");
 

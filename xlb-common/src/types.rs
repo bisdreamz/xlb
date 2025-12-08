@@ -1,6 +1,6 @@
+use crate::net::IpVersion;
 use serde::Deserialize;
 use strum::IntoStaticStr;
-use crate::net::IpVersion;
 
 /// Generic port mapping struct representing
 /// a port on the local machine and a port
@@ -37,7 +37,7 @@ pub struct Backend {
     /// Aggregate count of live connections
     pub conns: u16,
     /// The ip protovol ver
-    pub ip_ver: IpVersion
+    pub ip_ver: IpVersion,
 }
 
 #[cfg(feature = "user")]
@@ -138,7 +138,7 @@ pub struct Flow {
     /// Key hash for this flow's counterpart in flow map,
     /// e.g. if this is a ToServer flow then counter key
     /// identifies the corresponding ToClient flow key
-    pub counter_flow_key_hash: u64
+    pub counter_flow_key_hash: u64,
 }
 
 #[cfg(feature = "user")]
@@ -154,7 +154,11 @@ pub struct FlowKey {
 
 impl FlowKey {
     pub fn new(ip: u128, port: u16) -> Self {
-        Self { ip, port, _pad: [0; 6] }
+        Self {
+            ip,
+            port,
+            _pad: [0; 6],
+        }
     }
 
     #[inline(always)]

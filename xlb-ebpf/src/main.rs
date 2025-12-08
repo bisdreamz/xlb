@@ -3,10 +3,10 @@
 #![allow(clippy::missing_safety_doc)]
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
 
+mod balancing;
+mod handler;
 mod net;
 mod utils;
-mod handler;
-mod balancing;
 
 use crate::handler::{PacketEvent, PacketHandler};
 use crate::net::packet::Packet;
@@ -64,26 +64,29 @@ pub fn xlb(ctx: XdpContext) -> u32 {
 
     unsafe {
         match PacketHandler::handle(&mut packet, config, &BACKENDS, &*flow_map, shutdown) {
-            Ok(action) => {
-                match action {
-                    PacketEvent::Pass => {
-                        packet_log_trace!(packet, "Handle pass");
+            Ok(action) => match action {
+                PacketEvent::Pass => {
+                    packet_log_trace!(packet, "Handle pass");
 
-                        xdp_action::XDP_PASS
-                    },
-                    PacketEvent::Return => {
-                        packet_log_trace!(packet, "Handle return");
-
-                        xdp_action::XDP_TX
-                    },
-                    PacketEvent::Forward(iface) => {
-                        packet_log_debug!(packet, "Handle OK");
-                        packet_log_trace!(packet, "Forwarding to iface {} (ingress={})", iface.idx, ctx.ingress_ifindex());
-
-                        bpf_redirect(iface.idx as u32, 0) as u32
-                    }
+                    xdp_action::XDP_PASS
                 }
-            }
+                PacketEvent::Return => {
+                    packet_log_trace!(packet, "Handle return");
+
+                    xdp_action::XDP_TX
+                }
+                PacketEvent::Forward(iface) => {
+                    packet_log_debug!(packet, "Handle OK");
+                    packet_log_trace!(
+                        packet,
+                        "Forwarding to iface {} (ingress={})",
+                        iface.idx,
+                        ctx.ingress_ifindex()
+                    );
+
+                    bpf_redirect(iface.idx as u32, 0) as u32
+                }
+            },
             Err(xlb_err) => {
                 let err_str: &'static str = xlb_err.into();
                 packet_log_warn!(packet, "Failed to handle packet: {}", err_str);

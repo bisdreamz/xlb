@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use sysctl::Sysctl;
 
 pub fn check_ip_forwarding() -> Result<()> {

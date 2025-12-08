@@ -1,7 +1,7 @@
 mod handler;
 pub use handler::*;
 
-mod utils;
 mod iface;
 mod tcp;
 mod types;
+mod utils;

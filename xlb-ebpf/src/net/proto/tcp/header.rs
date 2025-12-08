@@ -52,7 +52,6 @@ impl<'a> TcpHeader<'a> {
         self.hdr.dest = new_dst.to_be_bytes();
     }
 
-
     /// Transform this packet into a RST response per RFC 793.
     ///
     /// Handles both ACK and non-ACK cases with proper sequence number calculation.
@@ -206,5 +205,4 @@ impl<'a> TcpHeader<'a> {
 
         self.hdr.check = (!sum as u16).to_be_bytes();
     }
-
 }

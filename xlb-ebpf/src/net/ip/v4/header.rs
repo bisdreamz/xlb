@@ -70,11 +70,11 @@ impl<'a> Ipv4Header<'a> {
         let mut sum: u32 = 0;
 
         // Sum all 16-bit words (skip checksum field at offset 10-11)
-        sum += ((hdr[0] as u32) << 8) | (hdr[1] as u32);   // version/ihl, tos
-        sum += ((hdr[2] as u32) << 8) | (hdr[3] as u32);   // total length
-        sum += ((hdr[4] as u32) << 8) | (hdr[5] as u32);   // id
-        sum += ((hdr[6] as u32) << 8) | (hdr[7] as u32);   // flags/offset
-        sum += ((hdr[8] as u32) << 8) | (hdr[9] as u32);   // ttl, protocol
+        sum += ((hdr[0] as u32) << 8) | (hdr[1] as u32); // version/ihl, tos
+        sum += ((hdr[2] as u32) << 8) | (hdr[3] as u32); // total length
+        sum += ((hdr[4] as u32) << 8) | (hdr[5] as u32); // id
+        sum += ((hdr[6] as u32) << 8) | (hdr[7] as u32); // flags/offset
+        sum += ((hdr[8] as u32) << 8) | (hdr[9] as u32); // ttl, protocol
         // Skip bytes 10-11 (checksum field itself)
         sum += ((hdr[12] as u32) << 8) | (hdr[13] as u32); // src ip [0:1]
         sum += ((hdr[14] as u32) << 8) | (hdr[15] as u32); // src ip [2:3]
@@ -89,7 +89,6 @@ impl<'a> Ipv4Header<'a> {
         let checksum = (!sum) as u16;
         self.hdr.check = checksum.to_be_bytes();
     }
-
 
     fn update_chksum_for_total_len(&mut self, new_len: u16) {
         // Update total length field

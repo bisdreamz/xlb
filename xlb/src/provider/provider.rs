@@ -58,11 +58,19 @@ pub async fn hosts_to_backends_with_routes(hosts: &[Host]) -> Vec<Backend> {
 
         match system::populate_backend_route(&mut backend).await {
             Ok(()) => {
-                trace!("Backend {} ({}) ready: ifindex={}", host.name, host.ip, backend.src_iface_ifindex);
+                trace!(
+                    "Backend {} ({}) ready: ifindex={}",
+                    host.name, host.ip, backend.src_iface_ifindex
+                );
                 backends.push(backend);
             }
             Err(e) => {
-                log::warn!("Skipping unreachable backend {} ({}): {}", host.name, host.ip, e);
+                log::warn!(
+                    "Skipping unreachable backend {} ({}): {}",
+                    host.name,
+                    host.ip,
+                    e
+                );
             }
         }
     }

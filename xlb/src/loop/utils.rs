@@ -4,10 +4,9 @@ use std::time::Duration;
 use xlb_common::types::FlowDirection::ToClient;
 use xlb_common::types::{Flow, FlowDirection};
 
-
 #[derive(Debug, Clone, Default)]
 pub struct AggregateFlowStats {
-    pub (crate) client_set: HashSet<u128>,
+    pub(crate) client_set: HashSet<u128>,
     pub to_server: Metrics,
     pub to_client: Metrics,
 }
@@ -31,8 +30,14 @@ impl AggregateFlowStats {
     }
 }
 
-fn add_flow_stats(flow: &Flow, metrics: &mut Metrics, direction: &FlowDirection, event_ns: u64,
-                  orphan_ttl_secs: u64, now_ns: u64) {
+fn add_flow_stats(
+    flow: &Flow,
+    metrics: &mut Metrics,
+    direction: &FlowDirection,
+    event_ns: u64,
+    orphan_ttl_secs: u64,
+    now_ns: u64,
+) {
     let is_new = flow.created_at_ns > event_ns;
     let is_rst_ready = is_rst_ready_for_cleanup(flow.rst_ns, event_ns);
     let is_closed = flow.fin_both_sides_closed || is_rst_ready;
@@ -92,8 +97,22 @@ pub fn aggregate_flow_stats<'a>(
         let is_active = !is_new && !is_closed && !is_orphaned;
 
         if flow.direction == ToClient {
-            add_flow_stats(&flow, &mut totals.to_client, &flow.direction, event_ns, orphan_ttl_secs, now_ns);
-            add_flow_stats(&flow, &mut backend.to_client, &flow.direction, event_ns, orphan_ttl_secs, now_ns);
+            add_flow_stats(
+                &flow,
+                &mut totals.to_client,
+                &flow.direction,
+                event_ns,
+                orphan_ttl_secs,
+                now_ns,
+            );
+            add_flow_stats(
+                &flow,
+                &mut backend.to_client,
+                &flow.direction,
+                event_ns,
+                orphan_ttl_secs,
+                now_ns,
+            );
 
             totals.to_client.bytes_transfer += delta_bytes;
             totals.to_client.packets_transfer += delta_packets;
@@ -103,8 +122,22 @@ pub fn aggregate_flow_stats<'a>(
             continue;
         }
 
-        add_flow_stats(&flow, &mut totals.to_server, &flow.direction, event_ns, orphan_ttl_secs, now_ns);
-        add_flow_stats(&flow, &mut backend.to_server, &flow.direction, event_ns, orphan_ttl_secs, now_ns);
+        add_flow_stats(
+            &flow,
+            &mut totals.to_server,
+            &flow.direction,
+            event_ns,
+            orphan_ttl_secs,
+            now_ns,
+        );
+        add_flow_stats(
+            &flow,
+            &mut backend.to_server,
+            &flow.direction,
+            event_ns,
+            orphan_ttl_secs,
+            now_ns,
+        );
 
         totals.to_server.bytes_transfer += delta_bytes;
         totals.to_server.packets_transfer += delta_packets;
@@ -125,7 +158,14 @@ pub fn aggregate_flow_stats<'a>(
         backend.to_client.active_clients = backend.client_set.len() as u32;
     }
 
-    (LbFlowStats { totals, backends: backends_map, available_backends: 0 }, new_prev_flow_stats)
+    (
+        LbFlowStats {
+            totals,
+            backends: backends_map,
+            available_backends: 0,
+        },
+        new_prev_flow_stats,
+    )
 }
 
 pub fn is_orphan(last_seen_ns: u64, now_ns: u64, orphan_ttl_secs: u64) -> bool {

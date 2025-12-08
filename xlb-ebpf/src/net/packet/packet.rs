@@ -3,8 +3,8 @@ use crate::net::types::{IpHeader, ProtoHeader};
 use crate::{net, utils};
 use aya_ebpf::programs::XdpContext;
 use aya_log_ebpf::info;
-use xlb_common::net::{IpVersion, Proto};
 use xlb_common::XlbErr;
+use xlb_common::net::{IpVersion, Proto};
 
 /// Macros for packet logging with compile-time optimization
 /// debug/trace logs are compiled out when 'verbose-logs' feature is disabled (zero overhead)
@@ -160,8 +160,18 @@ impl<'a> Packet<'a> {
             self.ctx,
             "{} MAC: {:x}:{:x}:{:x}:{:x}:{:x}:{:x} -> {:x}:{:x}:{:x}:{:x}:{:x}:{:x}",
             label,
-            src_mac[0], src_mac[1], src_mac[2], src_mac[3], src_mac[4], src_mac[5],
-            dst_mac[0], dst_mac[1], dst_mac[2], dst_mac[3], dst_mac[4], dst_mac[5]
+            src_mac[0],
+            src_mac[1],
+            src_mac[2],
+            src_mac[3],
+            src_mac[4],
+            src_mac[5],
+            dst_mac[0],
+            dst_mac[1],
+            dst_mac[2],
+            dst_mac[3],
+            dst_mac[4],
+            dst_mac[5]
         );
 
         match &self.ip_hdr {
@@ -173,9 +183,15 @@ impl<'a> Packet<'a> {
                     self.ctx,
                     "{} IP: {}.{}.{}.{}:{} -> {}.{}.{}.{}:{}",
                     label,
-                    (src_ip >> 24) & 0xff, (src_ip >> 16) & 0xff, (src_ip >> 8) & 0xff, src_ip & 0xff,
+                    (src_ip >> 24) & 0xff,
+                    (src_ip >> 16) & 0xff,
+                    (src_ip >> 8) & 0xff,
+                    src_ip & 0xff,
                     self.src_port(),
-                    (dst_ip >> 24) & 0xff, (dst_ip >> 16) & 0xff, (dst_ip >> 8) & 0xff, dst_ip & 0xff,
+                    (dst_ip >> 24) & 0xff,
+                    (dst_ip >> 16) & 0xff,
+                    (dst_ip >> 8) & 0xff,
+                    dst_ip & 0xff,
                     self.dst_port()
                 );
             }

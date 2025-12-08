@@ -2,7 +2,7 @@
 #![allow(clippy::missing_safety_doc)]
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
 
+pub mod balancing;
+pub mod handler;
 pub mod net;
 pub mod utils;
-pub mod handler;
-pub mod balancing;

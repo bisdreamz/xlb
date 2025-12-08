@@ -50,7 +50,14 @@ fn copy_to_out_dir(src_obj: PathBuf) -> anyhow::Result<()> {
 }
 
 fn build_ebpf_package(name: &str, ebpf_root: &Path) -> anyhow::Result<()> {
-    let features = ["build-ebpf"];
+    let profile = env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
+    let mut features = vec!["build-ebpf"];
+
+    // Enable verbose-logs in debug/dev builds, disable in release
+    if profile != "release" {
+        features.push("verbose-logs");
+    }
+
     let package = aya_build::Package {
         name,
         root_dir: ebpf_root

@@ -9,8 +9,13 @@ pub struct Metrics {
     pub active_conns: u32,
     /// New connections since last poll
     pub new_conns: u32,
-    /// Closed connections since last poll (rst or fin received)
-    pub closed_conns: u32,
+    /// Total closed connections regardless of source
+    pub closed_total_conns: u32,
+    /// Gracefully closed connections since last poll (rst or fin received)
+    pub closed_fin_by_client: u32,
+    pub closed_fin_by_server: u32,
+    pub closed_rsts_by_client: u32,
+    pub closed_rsts_by_server: u32,
     /// Total bytes transferred since last poll
     pub bytes_transfer: u64,
     /// Total packets transferred since last poll

@@ -1,12 +1,12 @@
 use crate::r#loop::metrics::Metrics;
 use std::collections::{HashMap, HashSet};
 use xlb_common::types::FlowDirection::ToClient;
-use xlb_common::types::Flow;
+use xlb_common::types::{Flow, FlowDirection};
 
 
 #[derive(Debug, Clone, Default)]
 pub struct AggregateFlowStats {
-    client_set: HashSet<u128>,
+    pub (crate) client_set: HashSet<u128>,
     pub to_server: Metrics,
     pub to_client: Metrics,
 }
@@ -28,11 +28,25 @@ impl AggregateFlowStats {
     }
 }
 
-fn add_flow_stats(flow: &Flow, metrics: &mut Metrics, event_ns: u64) {
+fn add_flow_stats(flow: &Flow, metrics: &mut Metrics, direction: &FlowDirection, event_ns: u64) {
     if flow.created_at_ns > event_ns {
         metrics.new_conns += 1;
-    } else if flow.closed_at_ns > event_ns {
-        metrics.closed_conns += 1;
+    } else if flow.fin_ns > event_ns && flow.fin_is_src {
+        match direction {
+            ToClient => metrics.closed_fin_by_server += 1,
+            FlowDirection::ToServer => metrics.closed_fin_by_client += 1,
+        }
+
+        if flow.fin_both_sides_closed {
+            metrics.closed_total_conns += 1;
+        }
+    } else if flow.rst {
+        match direction {
+            ToClient => metrics.closed_rsts_by_server += 1,
+            FlowDirection::ToServer => metrics.closed_rsts_by_client += 1,
+        }
+
+        metrics.closed_total_conns += 1;
     } else {
         metrics.active_conns += 1;
     }
@@ -57,14 +71,14 @@ pub fn aggregate_flow_stats<'a>(
             .or_insert_with(|| AggregateFlowStats::default());
 
         if flow.direction == ToClient {
-            add_flow_stats(&flow, &mut totals.to_client, event_ns);
-            add_flow_stats(&flow, &mut backend.to_client, event_ns);
+            add_flow_stats(&flow, &mut totals.to_client, &flow.direction, event_ns);
+            add_flow_stats(&flow, &mut backend.to_client, &flow.direction, event_ns);
 
             continue;
         }
 
-        add_flow_stats(&flow, &mut totals.to_server, event_ns);
-        add_flow_stats(&flow, &mut backend.to_server, event_ns);
+        add_flow_stats(&flow, &mut totals.to_server, &flow.direction, event_ns);
+        add_flow_stats(&flow, &mut backend.to_server, &flow.direction, event_ns);
 
         totals.add_client(flow.client_ip);
         backend.add_client(flow.client_ip);
@@ -85,10 +99,14 @@ fn merge_metrics_calc_deltas(prev: &Metrics, curr: &Metrics) -> Metrics {
 
     deltas.active_conns = curr.active_clients;
     deltas.new_conns = curr.new_conns;
-    deltas.closed_conns = curr.closed_conns;
+    deltas.closed_total_conns = curr.closed_total_conns;
+    deltas.closed_fin_by_client = curr.closed_fin_by_client;
+    deltas.closed_fin_by_server = curr.closed_fin_by_server;
+    deltas.closed_rsts_by_client = curr.closed_rsts_by_client;
+    deltas.closed_rsts_by_server = curr.closed_rsts_by_server;
 
-    deltas.bytes_transfer = curr.bytes_transfer - prev.bytes_transfer;
-    deltas.packets_transfer = curr.packets_transfer - prev.packets_transfer;
+    deltas.bytes_transfer = curr.bytes_transfer.saturating_sub(prev.bytes_transfer);
+    deltas.packets_transfer = curr.packets_transfer.saturating_sub(prev.packets_transfer);
 
     deltas
 }
@@ -115,4 +133,28 @@ pub fn calc_aggregate_deltas(prev: &LbFlowStats, curr: &LbFlowStats) -> LbFlowSt
     }
 
     deltas
+}
+
+/// Gets the current monotonic timestamp in nanoseconds,
+/// matching the eBPF bpf_ktime_get_ns() behavior
+pub fn monotonic_now_ns() -> u64 {
+    let mut ts = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    unsafe {
+        libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts);
+    }
+    (ts.tv_sec as u64 * 1_000_000_000) + (ts.tv_nsec as u64)
+}
+
+/// Formats a u128 IP address (IPv4 or IPv6) as a string
+pub fn format_ip(ip: u128) -> String {
+    use std::net::{Ipv4Addr, Ipv6Addr};
+
+    if ip <= u32::MAX as u128 {
+        Ipv4Addr::from(ip as u32).to_string()
+    } else {
+        Ipv6Addr::from(ip).to_string()
+    }
 }

@@ -47,16 +47,16 @@ pub fn handle_tcp_packet(packet: &mut Packet,
         return Ok(Some(new_flow(packet, &next_backend, port_map_dest, flow_map)?));
     }
 
-    if tcp.is_fin() || tcp.is_rst() {
-        packet_log_debug!(packet, "TCP FIN/RST");
+    let (tcp_fin, tcp_rst) = (tcp.is_fin(), tcp.is_rst());
+    if tcp_fin || tcp_rst {
         // record flow state but continue to process
-        close_flow(packet, direction, flow_map)?;
+        close_flow(packet, direction, tcp_fin, tcp_rst, flow_map)?;
     }
 
     existing_flow(packet, direction, flow_map)
 }
 
-fn close_flow(packet: &Packet, direction: &FlowDirection, flow_map: &'static HashMap<u64, Flow>) -> Result<(), XlbErr> {
+fn close_flow(packet: &Packet, direction: &FlowDirection, fin: bool, rst: bool, flow_map: &'static HashMap<u64, Flow>) -> Result<(), XlbErr> {
     let flow_key = utils::get_flow_key(packet, direction);
     let key_hash = flow_key.hash_key();
 
@@ -69,8 +69,18 @@ fn close_flow(packet: &Packet, direction: &FlowDirection, flow_map: &'static Has
     };
 
     let flow = unsafe { &mut *flow_ptr };
+    let now_ns = utils::monotonic_time_ns();
 
-    flow.closed_at_ns = utils::monotonic_time_ns();
+    if fin {
+        packet_log_debug!(packet, "TCP fin initiated");
+
+        flow.fin_ns = now_ns;
+        flow.fin_is_src = true;
+    } else if rst {
+        packet_log_debug!(packet, "TCP rst initiated");
+        flow.rst = true;
+        flow.rst_is_src = true;
+    }
 
     let Some(counter_flow_ptr) = flow_map.get_ptr_mut(&flow.counter_flow_key_hash) else {
         packet_log_warn!(packet, "Flow exists but counter-flow missing. OKing for safety anyway!");
@@ -80,7 +90,13 @@ fn close_flow(packet: &Packet, direction: &FlowDirection, flow_map: &'static Has
 
     let counter_flow = unsafe { &mut *counter_flow_ptr };
 
-    counter_flow.closed_at_ns = utils::monotonic_time_ns();
+    if fin && counter_flow.fin_ns > 0 {
+        flow.fin_both_sides_closed = true;
+        counter_flow.fin_both_sides_closed = true;
+    } else if rst {
+        counter_flow.rst = true;
+        counter_flow.rst_is_src = false;
+    }
 
     Ok(())
 }
@@ -215,7 +231,11 @@ fn new_flow_to_server(packet: &mut Packet, backend: &Backend,
         packets_transfer: 1,
         created_at_ns: now_ns,
         last_seen_ns: now_ns,
-        closed_at_ns: 0,
+        fin_ns: 0,
+        fin_is_src: false,
+        fin_both_sides_closed: false,
+        rst: false,
+        rst_is_src: false,
         counter_flow_key_hash: client_flow_key.hash_key(),
     };
 
@@ -242,7 +262,11 @@ fn new_flow_to_client(packet: &mut Packet, backend: &Backend,
         packets_transfer: 1,
         created_at_ns: now_ns,
         last_seen_ns: now_ns,
-        closed_at_ns: 0,
+        fin_ns: 0,
+        fin_is_src: false,
+        fin_both_sides_closed: false,
+        rst: false,
+        rst_is_src: false,
         counter_flow_key_hash
     })
 }

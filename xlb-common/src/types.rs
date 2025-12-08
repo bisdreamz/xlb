@@ -119,8 +119,22 @@ pub struct Flow {
     /// seen on this flow
     pub last_seen_ns: u64,
     /// Monotonic timestamp for when this
-    /// flow was closed if value > 0
-    pub closed_at_ns: u64,
+    /// flow received a fin. Conn is only
+    /// considered gracefully closed when
+    /// both opposing flows record a fin
+    pub fin_ns: u64,
+    /// True if this side of the flow was the
+    /// first fin source, e.g. initiated the close
+    pub fin_is_src: bool,
+    /// True if both sides of the flow have gracefully
+    /// closed the connection
+    pub fin_both_sides_closed: bool,
+    /// This flow has received an RST from eitherside,
+    /// conn is dead
+    pub rst: bool,
+    /// If true and rst=true, this side of the flow
+    /// was the cause of unhappy closure
+    pub rst_is_src: bool,
     /// Key hash for this flow's counterpart in flow map,
     /// e.g. if this is a ToServer flow then counter key
     /// identifies the corresponding ToClient flow key

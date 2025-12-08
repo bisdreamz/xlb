@@ -7,13 +7,13 @@ use xlb_common::net::{IpVersion, Proto};
 use xlb_common::XlbErr;
 
 /// Macros for packet logging with compile-time optimization
-/// debug/trace logs are compiled out in release builds (zero overhead)
+/// debug/trace logs are compiled out when 'verbose-logs' feature is disabled (zero overhead)
 /// info/warn/error logs are always included
 
 #[macro_export]
 macro_rules! packet_log_trace {
     ($packet:expr, $($arg:tt)*) => {
-        #[cfg(debug_assertions)]
+        #[cfg(feature = "verbose-logs")]
         ::aya_log_ebpf::trace!($packet.xdp_context(), $($arg)*);
     };
 }
@@ -21,7 +21,7 @@ macro_rules! packet_log_trace {
 #[macro_export]
 macro_rules! packet_log_debug {
     ($packet:expr, $($arg:tt)*) => {
-        #[cfg(debug_assertions)]
+        #[cfg(feature = "verbose-logs")]
         ::aya_log_ebpf::debug!($packet.xdp_context(), $($arg)*);
     };
 }

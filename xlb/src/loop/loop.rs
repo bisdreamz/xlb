@@ -2,13 +2,14 @@ use crate::provider::{hosts_to_backends_with_routes, BackendProvider};
 use crate::r#loop::utils;
 use crate::r#loop::utils::LbFlowStats;
 use aya::maps::{Array, HashMap, MapData};
-use log::trace;
+use log::{trace, info};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tokio::time::interval;
 use xlb_common::consts;
 use xlb_common::types::{Backend, Flow};
+use crate::r#loop::metrics::Metrics;
 
 pub struct MaintenanceLoopHandle {
     shutdown: Arc<AtomicBool>,
@@ -35,6 +36,10 @@ pub struct MaintenanceLoop {
     /// to be an orpaned connection (closed w/o fin or rst)
     #[allow(dead_code)]
     orphan_ttl: Duration,
+    /// Timestamp (monotonic ns) of the last run,
+    /// used as a filter for identifying recent events
+    /// such as new conns or closures
+    last_run_ns: u64,
 }
 
 impl MaintenanceLoop {
@@ -51,12 +56,13 @@ impl MaintenanceLoop {
             ebpf_flows,
             prev_stats: LbFlowStats::default(),
             orphan_ttl,
+            last_run_ns: 0,
         }
     }
 
     async fn run(&mut self) {
         let stats = utils::aggregate_flow_stats(
-            0,
+            self.last_run_ns,
             self.ebpf_flows
                 .iter()
                 .flatten()
@@ -65,7 +71,7 @@ impl MaintenanceLoop {
         let deltas = utils::calc_aggregate_deltas(&self.prev_stats, &stats);
         self.prev_stats = stats;
 
-        trace!("Delta stats: {:?}", deltas);
+        log_pretty_stats(&deltas);
 
         let new_hosts = self.provider.get_backends();
         let new_backends = hosts_to_backends_with_routes(&new_hosts).await;
@@ -80,11 +86,11 @@ impl MaintenanceLoop {
             self.ebpf_backends.set(i, &empty_backend.clone(), 0)
                 .expect("Failed to set empty sentinel backend!");
         }
-
-        // TODO count and evict orphans from orphan_ttl + last_seen_ns
-        // TODO flowmap closed conn cleanup here
-
         trace!("Updated {} backends", new_backends.len());
+
+        prune_orphaned_or_closed(&mut self.ebpf_flows);
+
+        self.last_run_ns = utils::monotonic_now_ns();
     }
 
     pub fn start(mut self, tick: Duration) -> MaintenanceLoopHandle {
@@ -113,5 +119,69 @@ impl MaintenanceLoop {
         });
 
         MaintenanceLoopHandle { shutdown }
+    }
+}
+
+fn prune_orphaned_or_closed(flow_map: &mut HashMap<MapData, u64, Flow>) {
+    let mut fins = 0;
+    let mut rsts = 0;
+
+    let keys_to_delete: Vec<u64> = flow_map
+        .iter()
+        .flatten()
+        .filter_map(|(key, flow)| {
+            if flow.fin_both_sides_closed || flow.rst {
+                if flow.fin_is_src {
+                    fins += 1;
+                } else if flow.rst_is_src {
+                    rsts += 1;
+                }
+
+                Some(key)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    for key in &keys_to_delete {
+        let _ = flow_map.remove(key);
+    }
+
+    trace!("Cleaned up {} closed connections (fin={} rst={})",
+        keys_to_delete.len() / 2, fins, rsts);
+}
+
+fn format_pretty_metrics(metrics: &Metrics) -> String {
+    let mbps = (metrics.bytes_transfer as f64 * 8.0) / 1_000_000.0;
+    let pps = metrics.packets_transfer;
+
+    let total_closed = metrics.closed_fin_by_client + metrics.closed_fin_by_server
+                     + metrics.closed_rsts_by_client + metrics.closed_rsts_by_server;
+    let total_fin = metrics.closed_fin_by_client + metrics.closed_fin_by_server;
+    let total_rst = metrics.closed_rsts_by_client + metrics.closed_rsts_by_server;
+
+    format!(
+        "pps={} mbps={:.2} active={} new={} closed={} (fin={} rst={})",
+        pps, mbps, metrics.active_conns, metrics.new_conns,
+        total_closed, total_fin, total_rst
+    )
+}
+
+fn log_pretty_stats(stats: &LbFlowStats) {
+    info!("Load Balancer Stats:");
+    info!("\tInbound  (ToServer): {}", format_pretty_metrics(&stats.totals.to_server));
+    info!("\tOutbound (ToClient): {}", format_pretty_metrics(&stats.totals.to_client));
+    info!("\tActive Clients: {}", stats.totals.client_set.len());
+
+    if !stats.backends.is_empty() {
+        info!("\tPer-Backend:");
+
+        for (backend_ip, backend_stats) in stats.backends.iter() {
+            let ip_str = utils::format_ip(*backend_ip);
+            info!("\t\t{} clients={}", ip_str, backend_stats.client_set.len());
+            info!("\t\t\tRX (Inbound):  {}", format_pretty_metrics(&backend_stats.to_server));
+            info!("\t\t\tTX (Outbound): {}", format_pretty_metrics(&backend_stats.to_client));
+        }
     }
 }

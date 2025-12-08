@@ -63,7 +63,14 @@ impl MaintenanceLoop {
 
     async fn run(&mut self) {
         let now_ns = utils::monotonic_now_ns();
-        let (stats, new_prev_flow_stats) = utils::aggregate_flow_stats(
+        let new_hosts = self.provider.get_backends();
+        let new_backends = hosts_to_backends_with_routes(&new_hosts).await;
+
+        if new_backends.is_empty() {
+            log::warn!("No backends available - all new connections will be dropped");
+        }
+
+        let (mut stats, new_prev_flow_stats) = utils::aggregate_flow_stats(
             self.last_run_ns,
             self.ebpf_flows.iter().flatten(),
             &self.prev_flow_stats,
@@ -71,12 +78,11 @@ impl MaintenanceLoop {
             now_ns,
         );
 
+        stats.available_backends = new_backends.len() as u32;
+
         log_pretty_stats(&stats);
 
         self.prev_flow_stats = new_prev_flow_stats;
-
-        let new_hosts = self.provider.get_backends();
-        let new_backends = hosts_to_backends_with_routes(&new_hosts).await;
 
         for (i, backend) in new_backends.iter().enumerate() {
             self.ebpf_backends.set(i as u32, backend, 0)
@@ -90,7 +96,7 @@ impl MaintenanceLoop {
         }
         trace!("Updated {} backends", new_backends.len());
 
-        prune_orphaned_or_closed(&mut self.ebpf_flows, now_ns, self.orphan_ttl.as_secs());
+        prune_orphaned_or_closed(&mut self.ebpf_flows, now_ns, self.last_run_ns, self.orphan_ttl.as_secs());
 
         self.last_run_ns = now_ns;
     }
@@ -125,7 +131,7 @@ impl MaintenanceLoop {
 }
 
 fn prune_orphaned_or_closed(flow_map: &mut HashMap<MapData, u64, Flow>,
-                            now_ns: u64, orphan_ttl_secs: u64) {
+                            now_ns: u64, last_run_ns: u64, orphan_ttl_secs: u64) {
     let mut fins = 0;
     let mut rsts = 0;
     let mut orphans = 0;
@@ -134,7 +140,9 @@ fn prune_orphaned_or_closed(flow_map: &mut HashMap<MapData, u64, Flow>,
         .iter()
         .flatten()
         .filter_map(|(key, flow)| {
-            if flow.fin_both_sides_closed || flow.rst {
+            let is_rst_ready = utils::is_rst_ready_for_cleanup(flow.rst_ns, last_run_ns);
+
+            if flow.fin_both_sides_closed || is_rst_ready {
                 if flow.fin_is_src {
                     fins += 1;
                 } else if flow.rst_is_src {
@@ -178,7 +186,8 @@ fn log_pretty_stats(stats: &LbFlowStats) {
     info!("Load Balancer Stats:");
     info!("\tInbound  (ToServer): {}", format_pretty_metrics(&stats.totals.to_server));
     info!("\tOutbound (ToClient): {}", format_pretty_metrics(&stats.totals.to_client));
-    info!("\tActive Clients: {}", stats.totals.client_set.len());
+    info!("\tActive Clients: {} | Available Backends: {}",
+          stats.totals.client_set.len(), stats.available_backends);
 
     if !stats.backends.is_empty() {
         info!("\tPer-Backend:");

@@ -78,7 +78,7 @@ fn close_flow(packet: &Packet, direction: &FlowDirection, fin: bool, rst: bool, 
         flow.fin_is_src = true;
     } else if rst {
         packet_log_debug!(packet, "TCP rst initiated");
-        flow.rst = true;
+        flow.rst_ns = now_ns;
         flow.rst_is_src = true;
     }
 
@@ -94,7 +94,7 @@ fn close_flow(packet: &Packet, direction: &FlowDirection, fin: bool, rst: bool, 
         flow.fin_both_sides_closed = true;
         counter_flow.fin_both_sides_closed = true;
     } else if rst {
-        counter_flow.rst = true;
+        counter_flow.rst_ns = now_ns;
         counter_flow.rst_is_src = false;
     }
 
@@ -234,7 +234,7 @@ fn new_flow_to_server(packet: &mut Packet, backend: &Backend,
         fin_ns: 0,
         fin_is_src: false,
         fin_both_sides_closed: false,
-        rst: false,
+        rst_ns: 0,
         rst_is_src: false,
         counter_flow_key_hash: client_flow_key.hash_key(),
     };
@@ -265,7 +265,7 @@ fn new_flow_to_client(packet: &mut Packet, backend: &Backend,
         fin_ns: 0,
         fin_is_src: false,
         fin_both_sides_closed: false,
-        rst: false,
+        rst_ns: 0,
         rst_is_src: false,
         counter_flow_key_hash
     })

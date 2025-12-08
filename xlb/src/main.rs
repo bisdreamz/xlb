@@ -5,7 +5,7 @@ mod provider;
 mod system;
 
 use crate::config::{BackendSource, XlbConfig};
-use crate::provider::{BackendProvider, FixedProvider};
+use crate::provider::{BackendProvider, FixedProvider, KubernetesProvider};
 use crate::r#loop::MaintenanceLoop;
 use anyhow::{anyhow, Context};
 use aya::maps::{Array, HashMap};
@@ -26,9 +26,10 @@ async fn main() -> anyhow::Result<()> {
 
     info!("Config {:?}", config);
 
-    let provider = match &config.provider {
-        BackendSource::Static { backends } => FixedProvider::new(backends.clone()),
-        _ => panic!("Backend source not impl yet"),
+    let provider: Arc<dyn BackendProvider> = match &config.provider {
+        BackendSource::Static { backends } => Arc::new(FixedProvider::new(backends.clone())),
+        BackendSource::Kubernetes { namespace, service } =>
+            Arc::new(KubernetesProvider::new(namespace.clone(), service.clone())),
     };
 
     provider
@@ -54,9 +55,8 @@ async fn main() -> anyhow::Result<()> {
         .ok_or_else(|| anyhow!("Failed to load FLOW_MAP map"))?
         .try_into()?;
 
-    let arc_provider = Arc::new(provider);
     let maint_loop = MaintenanceLoop::new(
-        arc_provider.clone(),
+        provider.clone(),
         ebpf_backends,
         ebpf_flows,
         Duration::from_secs(config.orphan_ttl_secs as u64)
@@ -78,7 +78,7 @@ async fn main() -> anyhow::Result<()> {
 
     loop_handle.stop();
     info!("Maintenance loop stopped");
-    arc_provider.shutdown().await
+    provider.shutdown().await
         .context("Failed to shutdown backend provider")?;
     info!("Backend provider shutdown");
 

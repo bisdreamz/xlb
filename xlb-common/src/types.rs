@@ -129,10 +129,10 @@ pub struct Flow {
     /// True if both sides of the flow have gracefully
     /// closed the connection
     pub fin_both_sides_closed: bool,
-    /// This flow has received an RST from eitherside,
-    /// conn is dead
-    pub rst: bool,
-    /// If true and rst=true, this side of the flow
+    /// Monotonic timestamp for when this flow received
+    /// an RST from either side. If > 0, conn is dead
+    pub rst_ns: u64,
+    /// If true and rst_ns > 0, this side of the flow
     /// was the cause of unhappy closure
     pub rst_is_src: bool,
     /// Key hash for this flow's counterpart in flow map,

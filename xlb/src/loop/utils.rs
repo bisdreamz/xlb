@@ -16,6 +16,8 @@ pub struct AggregateFlowStats {
 pub struct LbFlowStats {
     pub totals: AggregateFlowStats,
     pub backends: HashMap<u128, AggregateFlowStats>,
+    /// Number of available backends from provider
+    pub available_backends: u32,
 }
 
 impl AggregateFlowStats {
@@ -32,7 +34,8 @@ impl AggregateFlowStats {
 fn add_flow_stats(flow: &Flow, metrics: &mut Metrics, direction: &FlowDirection, event_ns: u64,
                   orphan_ttl_secs: u64, now_ns: u64) {
     let is_new = flow.created_at_ns > event_ns;
-    let is_closed = flow.fin_both_sides_closed || flow.rst;
+    let is_rst_ready = is_rst_ready_for_cleanup(flow.rst_ns, event_ns);
+    let is_closed = flow.fin_both_sides_closed || is_rst_ready;
     let is_orphaned = is_orphan(flow.last_seen_ns, now_ns, orphan_ttl_secs);
 
     if is_new {
@@ -45,7 +48,7 @@ fn add_flow_stats(flow: &Flow, metrics: &mut Metrics, direction: &FlowDirection,
             FlowDirection::ToServer => metrics.closed_fin_by_client += 1,
         }
         metrics.closed_total_conns += 1;
-    } else if flow.rst && flow.rst_is_src {
+    } else if is_rst_ready && flow.rst_is_src {
         match direction {
             ToClient => metrics.closed_rsts_by_server += 1,
             FlowDirection::ToServer => metrics.closed_rsts_by_client += 1,
@@ -83,7 +86,8 @@ pub fn aggregate_flow_stats<'a>(
             .or_insert_with(|| AggregateFlowStats::default());
 
         let is_new = flow.created_at_ns > event_ns;
-        let is_closed = flow.fin_both_sides_closed || flow.rst;
+        let is_rst_ready = is_rst_ready_for_cleanup(flow.rst_ns, event_ns);
+        let is_closed = flow.fin_both_sides_closed || is_rst_ready;
         let is_orphaned = is_orphan(flow.last_seen_ns, now_ns, orphan_ttl_secs);
         let is_active = !is_new && !is_closed && !is_orphaned;
 
@@ -121,11 +125,16 @@ pub fn aggregate_flow_stats<'a>(
         backend.to_client.active_clients = backend.client_set.len() as u32;
     }
 
-    (LbFlowStats { totals, backends: backends_map }, new_prev_flow_stats)
+    (LbFlowStats { totals, backends: backends_map, available_backends: 0 }, new_prev_flow_stats)
 }
 
 pub fn is_orphan(last_seen_ns: u64, now_ns: u64, orphan_ttl_secs: u64) -> bool {
     Duration::from_nanos(now_ns.saturating_sub(last_seen_ns)).as_secs() > orphan_ttl_secs
+}
+
+/// Returns true if RST happened at least 1 loop cycle ago (ready to count and delete)
+pub fn is_rst_ready_for_cleanup(rst_ns: u64, last_run_ns: u64) -> bool {
+    rst_ns > 0 && rst_ns < last_run_ns
 }
 
 /// Gets the current monotonic timestamp in nanoseconds,

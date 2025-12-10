@@ -14,7 +14,7 @@ use aya_ebpf::helpers::bpf_redirect;
 use aya_ebpf::macros::map;
 use aya_ebpf::maps::{Array, HashMap};
 use aya_ebpf::{bindings::xdp_action, macros::xdp, programs::XdpContext};
-use aya_log_ebpf::warn;
+use aya_log_ebpf::{trace, warn};
 use xlb_common::config::ebpf::EbpfConfig;
 use xlb_common::consts;
 use xlb_common::types::{Backend, Flow};
@@ -39,7 +39,7 @@ pub fn xlb(ctx: XdpContext) -> u32 {
     let mut packet = match Packet::new(&ctx) {
         Ok(Some(packet)) => packet,
         Ok(None) => {
-            #[cfg(debug_assertions)]
+            #[cfg(feature = "verbose-logs")]
             trace!(&ctx, "Valid packet but misc protos, passing");
 
             return xdp_action::XDP_PASS;

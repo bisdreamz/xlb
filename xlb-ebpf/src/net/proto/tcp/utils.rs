@@ -3,7 +3,8 @@ use network_types::tcp::TcpHdr;
 use xlb_common::XlbErr;
 
 /// Shrink packet payload so only TCP header remains before emitting RST.
-pub(super) fn truncate_payload_for_rst(
+#[inline(always)]
+pub fn truncate_payload_for_rst(
     ctx: &XdpContext,
     current_total_len: u16,
     ip_hdr_len_bytes: u8,

@@ -46,12 +46,14 @@ pub fn handle_tcp_packet(
         let next_backend =
             balancing::select_backend(strategy, backends).ok_or(XlbErr::ErrNoBackends)?;
 
-        return Ok(Some(new_flow(
-            packet,
-            &next_backend,
-            port_map_dest,
-            flow_map,
-        )?));
+        return match new_flow(packet, &next_backend, port_map_dest, flow_map) {
+            Ok(flow) => Ok(Some(flow)),
+            Err(XlbErr::ErrNoEphemeralPorts) => match packet.rst() {
+                Ok(_) => Ok(None),
+                Err(err) => Err(err),
+            },
+            Err(err) => return Err(err),
+        };
     }
 
     let (tcp_fin, tcp_rst) = (tcp.is_fin(), tcp.is_rst());
@@ -169,7 +171,7 @@ fn find_ephemeral_port(
     flow_map: &'static HashMap<u64, Flow>,
 ) -> Result<FlowKey, XlbErr> {
     for _ in 0..5 {
-        let src_port = (unsafe { bpf_get_prandom_u32() } % 10000) as u16 + 5000;
+        let src_port = (unsafe { bpf_get_prandom_u32() } % 50000) as u16 + 5000;
         let client_flow_key = utils::client_flow_key(backend.ip, src_port);
         let client_key_hash = client_flow_key.hash_key();
 

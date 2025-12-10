@@ -1,4 +1,5 @@
 use crate::net::eth::{EthHeader, MacAddr};
+use crate::net::proto::truncate_payload_for_rst;
 use crate::net::types::{IpHeader, ProtoHeader};
 use crate::{net, utils};
 use aya_ebpf::programs::XdpContext;
@@ -55,6 +56,7 @@ pub struct Packet<'a> {
 }
 
 impl<'a> Packet<'a> {
+    #[inline(always)]
     pub fn new(ctx: &'a XdpContext) -> Result<Option<Self>, XlbErr> {
         let eth_hdr_ptr = utils::eth::get_eth_hdr_ptr(ctx).map_err(|_| XlbErr::ErrParseHdrEth)?;
         let eth_hdr = EthHeader::new(eth_hdr_ptr);
@@ -275,6 +277,7 @@ impl<'a> Packet<'a> {
 
     /// Transform packet into a RST response by swapping
     /// the src/dst values. Errors if this is not a TCP packet.
+    #[inline(always)]
     pub fn rst(&mut self) -> Result<(), XlbErr> {
         let src_mac = self.eth_hdr.src_mac();
         let dst_mac = self.eth_hdr.dst_mac();
@@ -286,19 +289,24 @@ impl<'a> Packet<'a> {
             IpHeader::Ipv4(ip) => {
                 let src_ip = ip.src_addr();
                 let dst_ip = ip.dst_addr();
+                let original_total_len = ip.total_len();
+                let ip_hdr_len_bytes = ip.header_len_ihl();
 
                 ip.set_src_dst_addrs(dst_ip, src_ip);
 
                 match &mut self.proto_hdr {
                     ProtoHeader::Tcp(tcp) => {
-                        let new_total_len = tcp.rst(
-                            self.ctx,
-                            dst_ip,
-                            src_ip,
-                            ip.total_len(),
-                            ip.header_len_ihl(),
-                        )?;
+                        let new_total_len =
+                            tcp.rst(dst_ip, src_ip, original_total_len, ip_hdr_len_bytes)?;
                         ip.set_total_len(new_total_len);
+
+                        let tcp_len_bytes = tcp.header_len_bytes();
+                        truncate_payload_for_rst(
+                            self.ctx,
+                            original_total_len,
+                            ip_hdr_len_bytes,
+                            tcp_len_bytes,
+                        )?;
                     }
                     ProtoHeader::Udp(_) => return Err(XlbErr::ErrInvalidOp),
                 }

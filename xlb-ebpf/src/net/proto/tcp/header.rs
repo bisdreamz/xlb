@@ -1,5 +1,4 @@
-use super::utils::{calculate_segment_length, get_header_len, truncate_payload_for_rst};
-use aya_ebpf::programs::XdpContext;
+use super::utils::{calculate_segment_length, get_header_len};
 use network_types::tcp::TcpHdr;
 use xlb_common::XlbErr;
 
@@ -13,6 +12,7 @@ pub struct TcpHeader<'a> {
 }
 
 impl<'a> TcpHeader<'a> {
+    #[inline(always)]
     pub fn new(ptr: *mut TcpHdr) -> Self {
         Self {
             hdr: unsafe { &mut *ptr },
@@ -22,6 +22,11 @@ impl<'a> TcpHeader<'a> {
     #[allow(dead_code)]
     pub fn as_ptr(&self) -> *const TcpHdr {
         self.hdr as *const TcpHdr
+    }
+
+    /// TCP header length in bytes derived from the data offset field.
+    pub fn header_len_bytes(&self) -> u32 {
+        get_header_len(self.hdr)
     }
 
     pub fn src_port(&self) -> u16 {
@@ -67,9 +72,9 @@ impl<'a> TcpHeader<'a> {
     ///
     /// # Returns
     /// Updated IP total length (header + TCP header) after payload truncation.
+    #[inline(always)]
     pub fn rst(
         &mut self,
-        ctx: &XdpContext,
         src_ip: u32,
         dst_ip: u32,
         ip_total_len_bytes: u16,
@@ -98,10 +103,10 @@ impl<'a> TcpHeader<'a> {
         self.clear_window_and_urgent();
 
         let tcp_len_bytes = get_header_len(self.hdr);
-        let new_total_len =
-            truncate_payload_for_rst(ctx, ip_total_len_bytes, ip_hdr_len_bytes, tcp_len_bytes)?;
 
         self.recalc_checksum(src_ip, dst_ip, tcp_len_bytes);
+
+        let new_total_len = (ip_hdr_len_bytes as u32).saturating_add(tcp_len_bytes) as u16;
 
         Ok(new_total_len)
     }

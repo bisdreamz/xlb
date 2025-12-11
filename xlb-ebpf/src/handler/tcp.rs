@@ -88,9 +88,7 @@ fn close_flow(
 
     if fin {
         packet_log_debug!(packet, "TCP fin initiated");
-
-        flow.fin_ns = now_ns;
-        flow.fin_is_src = true;
+        flow.fin = true;
     } else if rst {
         packet_log_debug!(packet, "TCP rst initiated");
         flow.rst_ns = now_ns;
@@ -100,17 +98,20 @@ fn close_flow(
     let Some(counter_flow_ptr) = flow_map.get_ptr_mut(&flow.counter_flow_key_hash) else {
         packet_log_warn!(
             packet,
-            "Flow exists but counter-flow missing. OKing for safety anyway!"
+            "Flow exists but counter-flow missing during RST or FIN!"
         );
 
-        return Ok(());
+        // should send a RST but flow is already marked as an RST
+        // or is FIN will be cleaned up later as an orphan
+        return Err(XlbErr::ErrOrphanedFlow);
     };
 
     let counter_flow = unsafe { &mut *counter_flow_ptr };
 
-    if fin && counter_flow.fin_ns > 0 {
-        flow.fin_both_sides_closed = true;
-        counter_flow.fin_both_sides_closed = true;
+    if fin && counter_flow.fin {
+        flow.fin_both_ns = now_ns;
+        counter_flow.fin_both_ns = now_ns;
+        counter_flow.fin_is_src = true;
     } else if rst {
         counter_flow.rst_ns = now_ns;
         counter_flow.rst_is_src = false;
@@ -268,9 +269,9 @@ fn new_flow_to_server(
         packets_transfer: 1,
         created_at_ns: now_ns,
         last_seen_ns: now_ns,
-        fin_ns: 0,
+        fin: false,
         fin_is_src: false,
-        fin_both_sides_closed: false,
+        fin_both_ns: 0,
         rst_ns: 0,
         rst_is_src: false,
         counter_flow_key_hash: client_flow_key.hash_key(),
@@ -303,9 +304,9 @@ fn new_flow_to_client(
         packets_transfer: 1,
         created_at_ns: now_ns,
         last_seen_ns: now_ns,
-        fin_ns: 0,
+        fin: false,
+        fin_both_ns: 0,
         fin_is_src: false,
-        fin_both_sides_closed: false,
         rst_ns: 0,
         rst_is_src: false,
         counter_flow_key_hash,

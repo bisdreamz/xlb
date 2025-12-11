@@ -3,7 +3,7 @@ use crate::r#loop::utils;
 use crate::r#loop::utils::LbFlowStats;
 use crate::provider::{BackendProvider, hosts_to_backends_with_routes};
 use aya::maps::{Array, HashMap, MapData};
-use log::{info, trace};
+use log::{info, trace, warn};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -31,8 +31,11 @@ pub struct MaintenanceLoop {
     ebpf_flows: HashMap<MapData, u64, Flow>,
     /// If a flow is active longer than this TTL it is considered
     /// to be an orpaned connection (closed w/o fin or rst)
-    #[allow(dead_code)]
     orphan_ttl: Duration,
+    /// Duration we await post a TCP flow side's FIN
+    /// event for time_wait to allow grace period for
+    /// full closure
+    tcp_time_wait_ttl: Duration,
     /// Timestamp (monotonic ns) of the last run,
     /// used as a filter for identifying recent events
     /// such as new conns or closures
@@ -49,6 +52,7 @@ impl MaintenanceLoop {
         ebpf_backends: Array<MapData, Backend>,
         ebpf_flows: HashMap<MapData, u64, Flow>,
         orphan_ttl: Duration,
+        tcp_time_wait_ttl: Duration,
     ) -> Self {
         Self {
             shutdown: OnceLock::new(),
@@ -56,6 +60,7 @@ impl MaintenanceLoop {
             ebpf_backends,
             ebpf_flows,
             orphan_ttl,
+            tcp_time_wait_ttl,
             last_run_ns: 0,
             prev_flow_stats: std::collections::HashMap::new(),
         }
@@ -74,7 +79,7 @@ impl MaintenanceLoop {
             self.last_run_ns,
             self.ebpf_flows.iter().flatten(),
             &self.prev_flow_stats,
-            self.orphan_ttl.as_secs(),
+            &self.orphan_ttl,
             now_ns,
         );
 
@@ -90,6 +95,13 @@ impl MaintenanceLoop {
                 .expect("Failed to set backend entry");
         }
 
+        if new_backends.len() > consts::MAX_BACKENDS as usize {
+            warn!(
+                "More backends than allowed ({}) - dropping extra backends",
+                consts::MAX_BACKENDS
+            );
+        }
+
         let empty_backend = Backend::default();
         for i in new_backends.len() as u32..consts::MAX_BACKENDS {
             self.ebpf_backends
@@ -102,7 +114,8 @@ impl MaintenanceLoop {
             &mut self.ebpf_flows,
             now_ns,
             self.last_run_ns,
-            self.orphan_ttl.as_secs(),
+            &self.orphan_ttl,
+            &self.tcp_time_wait_ttl,
         );
 
         self.last_run_ns = now_ns;
@@ -145,7 +158,8 @@ fn prune_orphaned_or_closed(
     flow_map: &mut HashMap<MapData, u64, Flow>,
     now_ns: u64,
     last_run_ns: u64,
-    orphan_ttl_secs: u64,
+    orphan_ttl: &Duration,
+    tcp_time_wait_ttl: &Duration,
 ) {
     let mut fins = 0;
     let mut rsts = 0;
@@ -155,16 +169,18 @@ fn prune_orphaned_or_closed(
         .iter()
         .flatten()
         .filter_map(|(key, flow)| {
-            let is_rst_ready = utils::is_rst_ready_for_cleanup(flow.rst_ns, last_run_ns);
+            let is_rst_ready = utils::rst_ready_for_cleanup(flow.rst_ns, last_run_ns);
+            let is_fin_ready =
+                utils::fin_ready_for_cleanup(flow.fin_both_ns, now_ns, tcp_time_wait_ttl);
 
-            if flow.fin_both_sides_closed || is_rst_ready {
+            if is_fin_ready || is_rst_ready {
                 if flow.fin_is_src {
                     fins += 1;
                 } else if flow.rst_is_src {
                     rsts += 1;
                 }
                 Some(key)
-            } else if utils::is_orphan(flow.last_seen_ns, now_ns, orphan_ttl_secs) {
+            } else if utils::is_orphan(flow.last_seen_ns, now_ns, orphan_ttl) {
                 orphans += 1;
                 Some(key)
             } else {
@@ -195,7 +211,7 @@ fn format_pretty_metrics(metrics: &Metrics) -> String {
         + metrics.closed_rsts_by_client
         + metrics.closed_rsts_by_server;
     let total_fin = metrics.closed_fin_by_client + metrics.closed_fin_by_server;
-    let total_rst = metrics.closed_rsts_by_client + metrics.closed_rsts_by_server;
+    let total_rst_by_side = metrics.closed_rsts_by_client + metrics.closed_rsts_by_server;
 
     format!(
         "pps={} mbps={:.2} active={} new={} closed={} (fin={} rst={} orphans={})",
@@ -205,7 +221,7 @@ fn format_pretty_metrics(metrics: &Metrics) -> String {
         metrics.new_conns,
         total_closed,
         total_fin,
-        total_rst,
+        total_rst_by_side,
         metrics.orphaned_conns
     )
 }

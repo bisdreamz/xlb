@@ -118,17 +118,18 @@ pub struct Flow {
     /// Monotonic timestamp of the last packet
     /// seen on this flow
     pub last_seen_ns: u64,
-    /// Monotonic timestamp for when this
-    /// flow received a fin. Conn is only
-    /// considered gracefully closed when
-    /// both opposing flows record a fin
-    pub fin_ns: u64,
+    /// Whether a fin has been received from
+    /// this side of the flow yet
+    pub fin: bool,
+    /// Monotonic timestamp for when
+    /// both sides of the flow finalized
+    /// bidirectional fin. Value > 0
+    /// indicates this connection has
+    /// been gracefully closed
+    pub fin_both_ns: u64,
     /// True if this side of the flow was the
     /// first fin source, e.g. initiated the close
     pub fin_is_src: bool,
-    /// True if both sides of the flow have gracefully
-    /// closed the connection
-    pub fin_both_sides_closed: bool,
     /// Monotonic timestamp for when this flow received
     /// an RST from either side. If > 0, conn is dead
     pub rst_ns: u64,

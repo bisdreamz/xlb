@@ -34,36 +34,34 @@ fn add_flow_stats(
     flow: &Flow,
     metrics: &mut Metrics,
     direction: &FlowDirection,
-    event_ns: u64,
-    orphan_ttl_secs: u64,
-    now_ns: u64,
+    conn_is_new: bool,
+    conn_is_rst: bool,
+    conn_is_fin: bool,
+    conn_is_orphan: bool,
+    conn_is_active: bool,
 ) {
-    let is_new = flow.created_at_ns > event_ns;
-    let is_rst_ready = is_rst_ready_for_cleanup(flow.rst_ns, event_ns);
-    let is_closed = flow.fin_both_sides_closed || is_rst_ready;
-    let is_orphaned = is_orphan(flow.last_seen_ns, now_ns, orphan_ttl_secs);
-
-    if is_new {
+    if conn_is_new {
         metrics.new_conns += 1;
     }
 
-    if flow.fin_both_sides_closed && flow.fin_is_src {
+    if conn_is_fin && flow.fin_is_src {
         match direction {
             ToClient => metrics.closed_fin_by_server += 1,
             FlowDirection::ToServer => metrics.closed_fin_by_client += 1,
         }
+
         metrics.closed_total_conns += 1;
-    } else if is_rst_ready && flow.rst_is_src {
+    } else if conn_is_rst && flow.rst_is_src {
         match direction {
             ToClient => metrics.closed_rsts_by_server += 1,
             FlowDirection::ToServer => metrics.closed_rsts_by_client += 1,
         }
         metrics.closed_total_conns += 1;
-    } else if is_orphaned {
+    } else if conn_is_orphan {
         metrics.orphaned_conns += 1;
     }
 
-    if !is_new && !is_closed && !is_orphaned {
+    if conn_is_active {
         metrics.active_conns += 1;
     }
 }
@@ -72,7 +70,7 @@ pub fn aggregate_flow_stats<'a>(
     event_ns: u64,
     flows: impl Iterator<Item = (u64, Flow)>,
     prev_flow_stats: &HashMap<u64, (u64, u64)>,
-    orphan_ttl_secs: u64,
+    orphan_ttl: &Duration,
     now_ns: u64,
 ) -> (LbFlowStats, HashMap<u64, (u64, u64)>) {
     let mut backends_map = HashMap::new();
@@ -91,27 +89,35 @@ pub fn aggregate_flow_stats<'a>(
             .or_insert_with(|| AggregateFlowStats::default());
 
         let is_new = flow.created_at_ns > event_ns;
-        let is_rst_ready = is_rst_ready_for_cleanup(flow.rst_ns, event_ns);
-        let is_closed = flow.fin_both_sides_closed || is_rst_ready;
-        let is_orphaned = is_orphan(flow.last_seen_ns, now_ns, orphan_ttl_secs);
-        let is_active = !is_new && !is_closed && !is_orphaned;
+        // record RSTs & FINs as they happen during our tick for metrics,
+        // which may differ from when we clean them from the
+        // officialy from the conn track e.g. for time wait
+        let is_rst = flow.rst_ns >= event_ns && flow.rst_ns <= now_ns;
+        let is_fin = flow.fin_both_ns >= event_ns && flow.fin_both_ns <= now_ns;
+        let is_orphaned = is_orphan(flow.last_seen_ns, now_ns, orphan_ttl);
+        let is_active = is_active(&flow) && !is_orphaned;
 
         if flow.direction == ToClient {
             add_flow_stats(
                 &flow,
                 &mut totals.to_client,
                 &flow.direction,
-                event_ns,
-                orphan_ttl_secs,
-                now_ns,
+                is_new,
+                is_rst,
+                is_fin,
+                is_orphaned,
+                is_active,
             );
+
             add_flow_stats(
                 &flow,
                 &mut backend.to_client,
                 &flow.direction,
-                event_ns,
-                orphan_ttl_secs,
-                now_ns,
+                is_new,
+                is_rst,
+                is_fin,
+                is_orphaned,
+                is_active,
             );
 
             totals.to_client.bytes_transfer += delta_bytes;
@@ -126,17 +132,22 @@ pub fn aggregate_flow_stats<'a>(
             &flow,
             &mut totals.to_server,
             &flow.direction,
-            event_ns,
-            orphan_ttl_secs,
-            now_ns,
+            is_new,
+            is_rst,
+            is_fin,
+            is_orphaned,
+            is_active,
         );
+
         add_flow_stats(
             &flow,
             &mut backend.to_server,
             &flow.direction,
-            event_ns,
-            orphan_ttl_secs,
-            now_ns,
+            is_new,
+            is_rst,
+            is_fin,
+            is_orphaned,
+            is_active,
         );
 
         totals.to_server.bytes_transfer += delta_bytes;
@@ -168,13 +179,23 @@ pub fn aggregate_flow_stats<'a>(
     )
 }
 
-pub fn is_orphan(last_seen_ns: u64, now_ns: u64, orphan_ttl_secs: u64) -> bool {
-    Duration::from_nanos(now_ns.saturating_sub(last_seen_ns)).as_secs() > orphan_ttl_secs
+pub fn is_orphan(last_seen_ns: u64, now_ns: u64, orphan_ttl: &Duration) -> bool {
+    Duration::from_nanos(now_ns.saturating_sub(last_seen_ns)).ge(orphan_ttl)
+}
+
+pub fn is_active(flow: &Flow) -> bool {
+    flow.fin_both_ns == 0 && flow.rst_ns == 0
 }
 
 /// Returns true if RST happened at least 1 loop cycle ago (ready to count and delete)
-pub fn is_rst_ready_for_cleanup(rst_ns: u64, last_run_ns: u64) -> bool {
+pub fn rst_ready_for_cleanup(rst_ns: u64, last_run_ns: u64) -> bool {
     rst_ns > 0 && rst_ns < last_run_ns
+}
+
+/// Returns true if the fin both timestamp was at least time_wait duration ago
+/// and both sides of the flow are marked closed
+pub fn fin_ready_for_cleanup(fin_both_ns: u64, now_ns: u64, time_wait_ttl: &Duration) -> bool {
+    fin_both_ns > 0 && Duration::from_nanos(now_ns.saturating_sub(fin_both_ns)).ge(&time_wait_ttl)
 }
 
 /// Gets the current monotonic timestamp in nanoseconds,

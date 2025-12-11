@@ -62,6 +62,7 @@ async fn main() -> anyhow::Result<()> {
         ebpf_backends,
         ebpf_flows,
         Duration::from_secs(config.orphan_ttl_secs as u64),
+        Duration::from_mins(1),
     );
 
     let loop_handle = maint_loop.start(Duration::from_secs(1));

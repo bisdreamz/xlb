@@ -3,6 +3,7 @@ mod ebpf;
 mod r#loop;
 mod provider;
 mod system;
+mod metrics;
 
 use crate::config::{BackendSource, XlbConfig};
 use crate::r#loop::MaintenanceLoop;
@@ -25,6 +26,13 @@ async fn main() -> anyhow::Result<()> {
     let iface = system::get_listen_iface(&config.listen)?;
 
     info!("Config {:?}", config);
+
+    if let Some(otel_config) = &config.otel {
+        if otel_config.enabled {
+            let service_name = config.name.clone().unwrap_or_else(|| "xlb".to_string());
+            metrics::init(otel_config, service_name)?;
+        }
+    }
 
     let provider: Arc<dyn BackendProvider> = match &config.provider {
         BackendSource::Static { backends } => Arc::new(FixedProvider::new(backends.clone())),

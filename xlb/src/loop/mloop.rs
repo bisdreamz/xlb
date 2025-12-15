@@ -1,5 +1,4 @@
 use crate::r#loop::metrics::Metrics;
-use crate::r#loop::utils;
 use crate::r#loop::utils::LbFlowStats;
 use crate::provider::{BackendProvider, hosts_to_backends_with_routes};
 use aya::maps::{Array, HashMap, MapData};
@@ -10,6 +9,8 @@ use std::time::Duration;
 use tokio::time::interval;
 use xlb_common::consts;
 use xlb_common::types::{Backend, Flow};
+use crate::metrics;
+use crate::r#loop::utils;
 
 pub struct MaintenanceLoopHandle {
     shutdown: Arc<AtomicBool>,
@@ -86,6 +87,7 @@ impl MaintenanceLoop {
         stats.available_backends = new_backends.len() as u32;
 
         log_pretty_stats(&stats);
+        metrics::log_metrics(&stats, &new_hosts);
 
         self.prev_flow_stats = new_prev_flow_stats;
 
@@ -203,9 +205,6 @@ fn prune_orphaned_or_closed(
 }
 
 fn format_pretty_metrics(metrics: &Metrics) -> String {
-    let mbps = (metrics.bytes_transfer as f64 * 8.0) / 1_000_000.0;
-    let pps = metrics.packets_transfer;
-
     let total_closed = metrics.closed_fin_by_client
         + metrics.closed_fin_by_server
         + metrics.closed_rsts_by_client
@@ -214,9 +213,9 @@ fn format_pretty_metrics(metrics: &Metrics) -> String {
     let total_rst_by_side = metrics.closed_rsts_by_client + metrics.closed_rsts_by_server;
 
     format!(
-        "pps={} mbps={:.2} active={} new={} closed={} (fin={} rst={} orphans={})",
-        pps,
-        mbps,
+        "pps={:.0} mbps={:.2} active={} new={} closed={} (fin={} rst={} orphans={})",
+        metrics.packets_per_second,
+        metrics.bandwidth_mbps,
         metrics.active_conns,
         metrics.new_conns,
         total_closed,

@@ -18,8 +18,10 @@ pub struct Metrics {
     pub closed_rsts_by_server: u32,
     /// Orphaned connections cleaned up (idle timeout)
     pub orphaned_conns: u32,
-    /// Total bytes transferred since last poll
-    pub bytes_transfer: u64,
-    /// Total packets transferred since last poll
-    pub packets_transfer: u64,
+    /// Average bandwidth in Mbps between last poll
+    pub bandwidth_mbps: f64,
+    /// Average packets per second between last poll
+    pub packets_per_second: f64,
+    /// Total bytes transferred (delta since last poll)
+    pub bytes_transferred: u64,
 }

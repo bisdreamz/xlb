@@ -35,6 +35,10 @@ sysctl = "0.5"
 kube = { version = "2.0", features = ["runtime", "derive"] }
 k8s-openapi = { version = "0.26", features = ["v1_32"] }
 futures = "0.3"
+opentelemetry = "0.31.0"
+opentelemetry_sdk = "0.31.0"
+opentelemetry-otlp = { version = "0.31.0", features = ["grpc-tonic", "http", "metrics"] }
+tonic = { version = "0.14.2", default-features = false }
 [build-dependencies]
 anyhow = { workspace = true }
 aya-build = { workspace = true }

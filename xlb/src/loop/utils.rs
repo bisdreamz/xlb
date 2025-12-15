@@ -77,6 +77,13 @@ pub fn aggregate_flow_stats<'a>(
     let mut totals = AggregateFlowStats::default();
     let mut new_prev_flow_stats = HashMap::new();
 
+    let delta_ns = now_ns.saturating_sub(event_ns);
+    let delta_secs = if delta_ns > 0 {
+        delta_ns as f64 / 1_000_000_000.0
+    } else {
+        1.0
+    };
+
     for (key, flow) in flows {
         let (prev_bytes, prev_packets) = prev_flow_stats.get(&key).copied().unwrap_or((0, 0));
         let delta_bytes = flow.bytes_transfer.saturating_sub(prev_bytes);
@@ -120,10 +127,14 @@ pub fn aggregate_flow_stats<'a>(
                 is_active,
             );
 
-            totals.to_client.bytes_transfer += delta_bytes;
-            totals.to_client.packets_transfer += delta_packets;
-            backend.to_client.bytes_transfer += delta_bytes;
-            backend.to_client.packets_transfer += delta_packets;
+            let mbps = (delta_bytes as f64 * 8.0) / delta_secs / 1_000_000.0;
+            let pps = delta_packets as f64 / delta_secs;
+            totals.to_client.bandwidth_mbps += mbps;
+            totals.to_client.packets_per_second += pps;
+            totals.to_client.bytes_transferred += delta_bytes;
+            backend.to_client.bandwidth_mbps += mbps;
+            backend.to_client.packets_per_second += pps;
+            backend.to_client.bytes_transferred += delta_bytes;
 
             continue;
         }
@@ -150,10 +161,14 @@ pub fn aggregate_flow_stats<'a>(
             is_active,
         );
 
-        totals.to_server.bytes_transfer += delta_bytes;
-        totals.to_server.packets_transfer += delta_packets;
-        backend.to_server.bytes_transfer += delta_bytes;
-        backend.to_server.packets_transfer += delta_packets;
+        let mbps = (delta_bytes as f64 * 8.0) / delta_secs / 1_000_000.0;
+        let pps = delta_packets as f64 / delta_secs;
+        totals.to_server.bandwidth_mbps += mbps;
+        totals.to_server.packets_per_second += pps;
+        totals.to_server.bytes_transferred += delta_bytes;
+        backend.to_server.bandwidth_mbps += mbps;
+        backend.to_server.packets_per_second += pps;
+        backend.to_server.bytes_transferred += delta_bytes;
 
         if is_active {
             totals.add_client(flow.client_ip);

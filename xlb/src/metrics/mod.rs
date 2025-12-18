@@ -1,6 +1,6 @@
-mod otel;
+mod egress;
 mod global;
 mod ingress;
-mod egress;
+mod otel;
 
 pub use otel::*;

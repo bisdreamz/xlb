@@ -100,6 +100,9 @@ impl<'a> TcpHeader<'a> {
             self.set_rst_flags(true);
         }
 
+        // Drop any TCP options for the RST we emit so checksum length matches a bare header.
+        self.hdr.set_doff(5);
+
         self.clear_window_and_urgent();
 
         let tcp_len_bytes = get_header_len(self.hdr);

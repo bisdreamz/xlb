@@ -1,5 +1,5 @@
-use crate::provider::Host;
 use crate::r#loop::utils::LbFlowStats;
+use crate::provider::Host;
 use anyhow::Result;
 use opentelemetry::metrics::{Counter, Gauge, Meter};
 use std::sync::OnceLock;
@@ -43,7 +43,8 @@ pub fn init(meter: &Meter) -> Result<()> {
             .build(),
     };
 
-    METRICS.set(metrics)
+    METRICS
+        .set(metrics)
         .map_err(|_| anyhow::anyhow!("Global metrics already initialized"))?;
 
     Ok(())
@@ -60,12 +61,15 @@ pub fn log_global(stats: &LbFlowStats, backends: &Vec<Host>) {
     let total_active_conns = stats.totals.to_server.active_conns;
     m.connections_active.record(total_active_conns as u64, &[]);
 
-    m.connections_opened.add(stats.totals.to_server.new_conns as u64, &[]);
+    m.connections_opened
+        .add(stats.totals.to_server.new_conns as u64, &[]);
 
     // these record side specific so must add them
-    let total_closed = stats.totals.to_server.closed_total_conns + stats.totals.to_client.closed_total_conns;
+    let total_closed =
+        stats.totals.to_server.closed_total_conns + stats.totals.to_client.closed_total_conns;
     m.connections_closed.add(total_closed as u64, &[]);
 
-    let total_orphaned = stats.totals.to_server.orphaned_conns + stats.totals.to_client.orphaned_conns;
+    let total_orphaned =
+        stats.totals.to_server.orphaned_conns + stats.totals.to_client.orphaned_conns;
     m.connections_orphaned.add(total_orphaned as u64, &[]);
 }

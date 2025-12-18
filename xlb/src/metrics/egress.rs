@@ -1,7 +1,7 @@
-use crate::r#loop::utils::{format_ip, LbFlowStats};
+use crate::r#loop::utils::{LbFlowStats, format_ip};
 use anyhow::Result;
-use opentelemetry::metrics::{Counter, Gauge, Meter};
 use opentelemetry::KeyValue;
+use opentelemetry::metrics::{Counter, Gauge, Meter};
 use std::sync::OnceLock;
 
 struct EgressMetrics {
@@ -45,7 +45,8 @@ pub fn init(meter: &Meter) -> Result<()> {
             .build(),
     };
 
-    METRICS.set(metrics)
+    METRICS
+        .set(metrics)
         .map_err(|_| anyhow::anyhow!("Egress metrics already initialized"))?;
 
     Ok(())
@@ -75,12 +76,18 @@ pub fn log_egress(stats: &LbFlowStats) {
 
         m.closures.add(
             backend_stats.to_client.closed_fin_by_server as u64,
-            &[KeyValue::new("backend", backend_str.clone()), KeyValue::new("type", "fin")],
+            &[
+                KeyValue::new("backend", backend_str.clone()),
+                KeyValue::new("type", "fin"),
+            ],
         );
 
         m.closures.add(
             backend_stats.to_client.closed_rsts_by_server as u64,
-            &[KeyValue::new("backend", backend_str.clone()), KeyValue::new("type", "rst")],
+            &[
+                KeyValue::new("backend", backend_str.clone()),
+                KeyValue::new("type", "rst"),
+            ],
         );
 
         m.bytes_transferred.add(

@@ -1,16 +1,16 @@
 use crate::r#loop::metrics::Metrics;
+use crate::r#loop::utils;
 use crate::r#loop::utils::LbFlowStats;
+use crate::metrics;
 use crate::provider::{BackendProvider, hosts_to_backends_with_routes};
 use aya::maps::{Array, HashMap, MapData};
-use log::{info, trace, warn};
+use log::{debug, trace, warn};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tokio::time::interval;
 use xlb_common::consts;
 use xlb_common::types::{Backend, Flow};
-use crate::metrics;
-use crate::r#loop::utils;
 
 pub struct MaintenanceLoopHandle {
     shutdown: Arc<AtomicBool>,
@@ -226,32 +226,32 @@ fn format_pretty_metrics(metrics: &Metrics) -> String {
 }
 
 fn log_pretty_stats(stats: &LbFlowStats) {
-    info!("Load Balancer Stats:");
-    info!(
+    debug!("Load Balancer Stats:");
+    debug!(
         "\tInbound  (ToServer): {}",
         format_pretty_metrics(&stats.totals.to_server)
     );
-    info!(
+    debug!(
         "\tOutbound (ToClient): {}",
         format_pretty_metrics(&stats.totals.to_client)
     );
-    info!(
+    debug!(
         "\tActive Clients: {} | Available Backends: {}",
         stats.totals.client_set.len(),
         stats.available_backends
     );
 
     if !stats.backends.is_empty() {
-        info!("\tPer-Backend:");
+        debug!("\tPer-Backend:");
 
         for (backend_ip, backend_stats) in stats.backends.iter() {
             let ip_str = utils::format_ip(*backend_ip);
-            info!("\t\t{} clients={}", ip_str, backend_stats.client_set.len());
-            info!(
+            debug!("\t\t{} clients={}", ip_str, backend_stats.client_set.len());
+            debug!(
                 "\t\t\tRX (Inbound):  {}",
                 format_pretty_metrics(&backend_stats.to_server)
             );
-            info!(
+            debug!(
                 "\t\t\tTX (Outbound): {}",
                 format_pretty_metrics(&backend_stats.to_client)
             );

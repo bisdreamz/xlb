@@ -1,9 +1,9 @@
 mod config;
 mod ebpf;
 mod r#loop;
+mod metrics;
 mod provider;
 mod system;
-mod metrics;
 
 use crate::config::{BackendSource, XlbConfig};
 use crate::r#loop::MaintenanceLoop;
@@ -95,7 +95,13 @@ async fn main() -> anyhow::Result<()> {
         .context("Failed to shutdown backend provider")?;
     info!("Backend provider shutdown");
 
-    info!("Waiting for graceful shutdown timeout to rst conns...");
+    let mut shutdown_flag: Array<_, u8> = ebpf
+        .map_mut("SHUTDOWN")
+        .ok_or_else(|| anyhow!("Failed to load SHUTDOWN map"))?
+        .try_into()?;
+    shutdown_flag.set(0, 1, 0)?;
+
+    info!("Waiting for graceful shutdown timeout, will reset any active conns...");
     tokio::time::sleep(Duration::from_secs(config.shutdown_timeout as u64)).await;
 
     info!("Graceful shutdown complete");

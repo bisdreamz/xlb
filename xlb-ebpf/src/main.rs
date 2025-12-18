@@ -31,8 +31,8 @@ static BACKENDS: Array<Backend> = Array::with_max_entries(consts::MAX_BACKENDS, 
 #[map(name = "FLOW_MAP")]
 static mut FLOW_MAP: HashMap<u64, Flow> = HashMap::with_max_entries(consts::MAX_ACTIVE_FLOWS, 0);
 
-#[unsafe(no_mangle)]
-pub static SHUTDOWN: bool = false;
+#[map(name = "SHUTDOWN")]
+static SHUTDOWN: Array<u8> = Array::with_max_entries(1, 0);
 
 #[xdp]
 pub fn xlb(ctx: XdpContext) -> u32 {
@@ -60,7 +60,7 @@ pub fn xlb(ctx: XdpContext) -> u32 {
         }
     };
     let flow_map = core::ptr::addr_of_mut!(FLOW_MAP);
-    let shutdown = unsafe { core::ptr::read_volatile(&SHUTDOWN) };
+    let shutdown = SHUTDOWN.get(0).map(|v| *v != 0).unwrap_or(false);
 
     unsafe {
         match PacketHandler::handle(&mut packet, config, &BACKENDS, &*flow_map, shutdown) {

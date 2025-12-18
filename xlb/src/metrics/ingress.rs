@@ -1,7 +1,7 @@
-use crate::r#loop::utils::{format_ip, LbFlowStats};
+use crate::r#loop::utils::{LbFlowStats, format_ip};
 use anyhow::Result;
-use opentelemetry::metrics::{Counter, Gauge, Meter};
 use opentelemetry::KeyValue;
+use opentelemetry::metrics::{Counter, Gauge, Meter};
 use std::sync::OnceLock;
 
 struct IngressMetrics {
@@ -44,7 +44,8 @@ pub fn init(meter: &Meter) -> Result<()> {
             .build(),
     };
 
-    METRICS.set(metrics)
+    METRICS
+        .set(metrics)
         .map_err(|_| anyhow::anyhow!("Ingress metrics already initialized"))?;
 
     Ok(())
@@ -74,12 +75,18 @@ pub fn log_ingress(stats: &LbFlowStats) {
 
         m.closures.add(
             backend_stats.to_server.closed_fin_by_client as u64,
-            &[KeyValue::new("backend", backend_str.clone()), KeyValue::new("type", "fin")],
+            &[
+                KeyValue::new("backend", backend_str.clone()),
+                KeyValue::new("type", "fin"),
+            ],
         );
 
         m.closures.add(
             backend_stats.to_server.closed_rsts_by_client as u64,
-            &[KeyValue::new("backend", backend_str.clone()), KeyValue::new("type", "rst")],
+            &[
+                KeyValue::new("backend", backend_str.clone()),
+                KeyValue::new("type", "rst"),
+            ],
         );
 
         m.bytes_transferred.add(

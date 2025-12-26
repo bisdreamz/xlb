@@ -30,3 +30,7 @@ target/
 *.profraw
 *.profdata
 xlb.yaml
+
+# Documentation build output
+docs/site/
+docs/schema.json

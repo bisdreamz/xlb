@@ -29,6 +29,7 @@ tokio = { workspace = true, features = [
 ] }
 config = { version = "0.15.18", default-features = false, features = ["convert-case", "yaml"] }
 serde = { version = "1.0.228", features = ["derive"] }
+schemars = "0.8"
 default-net = "0.22.0"
 async-trait = "0.1.89"
 sysctl = "0.5"
@@ -56,6 +57,10 @@ cargo_metadata = { workspace = true }
 # workflows with stable cargo; stable cargo outright refuses to load manifests that use unstable
 # features.
 xlb-ebpf = { path = "../xlb-ebpf" }
+
+[lib]
+name = "xlb"
+path = "src/lib.rs"
 
 [[bin]]
 name = "xlb"

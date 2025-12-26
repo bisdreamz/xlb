@@ -1,6 +1,7 @@
 use crate::provider::Host;
 use anyhow::{Result, bail};
 use config::Config;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -8,7 +9,7 @@ use xlb_common::config::routing::RoutingMode;
 use xlb_common::net::Proto;
 use xlb_common::types::PortMapping;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum BackendSource {
     Static {
@@ -22,7 +23,7 @@ pub enum BackendSource {
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum ListenAddr {
     /// Will attach to the interface and primary ip of
@@ -34,7 +35,7 @@ pub enum ListenAddr {
     Ip(String),
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum OtelProtocol {
     #[default]
@@ -43,7 +44,7 @@ pub enum OtelProtocol {
 }
 
 /// OpenTelemetry configuration for metrics export
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct OtelConfig {
     /// Enable/disable OTEL metrics export
     #[serde(default)]
@@ -66,7 +67,7 @@ const fn default_otel_export_interval() -> u64 {
 }
 
 /// The user facing application config
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub struct XlbConfig {
     /// Optional name to attach to future otel metrics,

@@ -1,0 +1,48 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "xlb.fullname" . }}-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "xlb.labels" . | nindent 4 }}
+data:
+  xlb.yaml: |
+    {{- if .Values.config.name }}
+    name: {{ .Values.config.name }}
+    {{- end }}
+    listen: {{ .Values.config.listen }}
+    proto: {{ .Values.config.proto }}
+    ports:
+      {{- range .Values.config.ports }}
+      - local_port: {{ .local_port }}
+        remote_port: {{ .remote_port }}
+      {{- end }}
+    provider:
+      {{- if .Values.config.provider.kubernetes }}
+      kubernetes:
+        namespace: {{ .Values.config.provider.kubernetes.namespace }}
+        service: {{ .Values.config.provider.kubernetes.service }}
+      {{- else if .Values.config.provider.static }}
+      static:
+        backends:
+          {{- range .Values.config.provider.static.backends }}
+          - name: {{ .name }}
+            ip: {{ .ip }}
+          {{- end }}
+      {{- end }}
+    mode: {{ .Values.config.mode }}
+    orphan_ttl_secs: {{ .Values.config.orphan_ttl_secs }}
+    shutdown_timeout: {{ .Values.config.shutdown_timeout }}
+    {{- if .Values.config.otel.enabled }}
+    otel:
+      enabled: {{ .Values.config.otel.enabled }}
+      endpoint: {{ .Values.config.otel.endpoint | quote }}
+      export_interval_secs: {{ .Values.config.otel.export_interval_secs }}
+      protocol: {{ .Values.config.otel.protocol }}
+      {{- if .Values.config.otel.headers }}
+      headers:
+        {{- range $key, $value := .Values.config.otel.headers }}
+        {{ $key }}: {{ $value | quote }}
+        {{- end }}
+      {{- end }}
+    {{- end }}

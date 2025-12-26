@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "xlb.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "xlb.labels" . | nindent 4 }}
+  annotations:
+    {{- if .Values.externalDNS.enabled }}
+    external-dns.alpha.kubernetes.io/ttl: {{ .Values.externalDNS.ttl | quote }}
+    {{- end }}
+    {{- with .Values.service.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    {{- range .Values.config.ports }}
+    - port: {{ .local_port }}
+      targetPort: {{ .local_port }}
+      protocol: {{ upper $.Values.config.proto }}
+      name: {{ lower $.Values.config.proto }}-{{ .local_port }}
+    {{- end }}
+  selector:
+    {{- include "xlb.selectorLabels" . | nindent 4 }}

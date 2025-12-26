@@ -2,11 +2,15 @@ use crate::net::IpVersion;
 use serde::Deserialize;
 use strum::IntoStaticStr;
 
+#[cfg(feature = "user")]
+use schemars::JsonSchema;
+
 /// Generic port mapping struct representing
 /// a port on the local machine and a port
 /// on some remote host
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Deserialize)]
+#[cfg_attr(feature = "user", derive(JsonSchema))]
 pub struct PortMapping {
     /// Port on this local machine e.g.
     /// could be the lb listen port,

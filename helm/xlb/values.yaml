@@ -1,0 +1,140 @@
+replicaCount: 2
+
+image:
+  repository: emaczura/xlb
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+
+securityContext:
+  capabilities:
+    add:
+      - NET_ADMIN
+      - SYS_ADMIN
+      - BPF
+  privileged: true
+
+service:
+  type: LoadBalancer
+  annotations: {}
+    # Example ExternalDNS annotations:
+    # external-dns.alpha.kubernetes.io/hostname: lb.example.com
+    # external-dns.alpha.kubernetes.io/ttl: "60"
+
+resources:
+  limits:
+    cpu: 4000m
+    memory: 512Mi
+  requests:
+    cpu: 2000m
+    memory: 256Mi
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity:
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      - labelSelector:
+          matchExpressions:
+            - key: app.kubernetes.io/name
+              operator: In
+              values:
+                - xlb
+        topologyKey: kubernetes.io/hostname
+
+# Graceful shutdown configuration
+# terminationGracePeriodSeconds should be shutdown_timeout + buffer
+terminationGracePeriodSeconds: 90
+
+# ExternalDNS integration
+externalDNS:
+  enabled: true
+  # DNS TTL - should match xlb.yaml shutdown_timeout
+  ttl: 60
+
+# XLB configuration
+config:
+  # Optional: service name for metrics
+  # If not set, defaults to kubernetes service name
+  name: ""
+
+  # Listen address (auto or specific IP)
+  listen: auto
+
+  # Protocol: tcp or udp
+  proto: tcp
+
+  # Port mappings
+  ports:
+    - local_port: 80
+      remote_port: 8080
+
+  # Backend provider
+  provider:
+    # For Kubernetes deployments
+    kubernetes:
+      namespace: default
+      service: backend-service
+    # For static deployments (comment out kubernetes above)
+    # static:
+    #   backends:
+    #     - name: backend-1
+    #       ip: 10.0.1.10
+
+  # Routing mode: nat or dsr
+  mode: nat
+
+  # Orphaned connection TTL (seconds)
+  orphan_ttl_secs: 300
+
+  # Graceful shutdown timeout - should match DNS TTL
+  shutdown_timeout: 60
+
+  # OpenTelemetry configuration
+  otel:
+    enabled: false
+    endpoint: "http://opentelemetry-collector:4317"
+    export_interval_secs: 10
+    protocol: grpc
+    headers: {}
+      # Example for authentication:
+      # Authorization: "Bearer token"
+
+# Readiness probe configuration
+readinessProbe:
+  exec:
+    command:
+      - sh
+      - -c
+      - "ip link show | grep -q xdp && [ ! -f /tmp/shutdown ]"
+  initialDelaySeconds: 5
+  periodSeconds: 1
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+# Liveness probe configuration
+livenessProbe:
+  exec:
+    command:
+      - sh
+      - -c
+      - "ip link show | grep -q xdp"
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+env:
+  RUST_LOG: "info"

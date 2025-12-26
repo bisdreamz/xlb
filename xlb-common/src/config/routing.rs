@@ -1,7 +1,11 @@
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "user")]
+use schemars::JsonSchema;
+
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "user", derive(JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum RoutingMode {
     /// Packets pass through lb bi-directionally, and is compatible

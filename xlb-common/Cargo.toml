@@ -7,12 +7,13 @@ license.workspace = true
 
 [features]
 default = []
-user = ["aya"]
+user = ["aya", "schemars"]
 
 [dependencies]
 aya = { workspace = true, optional = true }
 strum = { version = "0.27.2", default-features = false, features = ["strum_macros", "derive"] }
 serde = { version = "1.0.228", default-features = false, features = ["derive"] }
+schemars = { version = "0.8", optional = true }
 
 [lib]
 path = "src/lib.rs"

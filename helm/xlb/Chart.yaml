@@ -1,0 +1,14 @@
+apiVersion: v2
+name: xlb
+description: High-performance eBPF Layer 4 Load Balancer
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - load-balancer
+  - ebpf
+  - xdp
+  - networking
+maintainers:
+  - name: Neuronic
+    email: emaczura@neuronic.dev

@@ -4,6 +4,7 @@ members = [
     "xlb",
     "xlb-common",
     "xlb-ebpf",
+    "xtask",
 ]
 default-members = ["xlb", "xlb-common", "xlb-ebpf"]
 

@@ -14,7 +14,9 @@ use aya_ebpf::helpers::bpf_redirect;
 use aya_ebpf::macros::map;
 use aya_ebpf::maps::{Array, HashMap};
 use aya_ebpf::{bindings::xdp_action, macros::xdp, programs::XdpContext};
-use aya_log_ebpf::{trace, warn};
+#[cfg(feature = "verbose-logs")]
+use aya_log_ebpf::trace;
+use aya_log_ebpf::warn;
 use xlb_common::config::ebpf::EbpfConfig;
 use xlb_common::consts;
 use xlb_common::types::{Backend, Flow};

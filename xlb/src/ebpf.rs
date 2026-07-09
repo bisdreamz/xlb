@@ -2,7 +2,7 @@ use crate::config::XlbConfig;
 use crate::system::ListenIface;
 use anyhow::{Result, anyhow};
 use aya::maps::Array;
-use aya::programs::{Xdp, XdpFlags};
+use aya::programs::{Xdp, XdpMode};
 use aya::{Ebpf, EbpfLoader};
 use log::{info, warn};
 use std::net::IpAddr;
@@ -93,16 +93,17 @@ pub fn load_ebpf_program(config: &XlbConfig, iface: &ListenIface) -> Result<Ebpf
             continue;
         }
 
-        // Try native XDP first, fallback to SKB mode for veth/virtual interfaces
-        let attach_result = program
-            .attach(&interface.name, XdpFlags::default())
-            .or_else(|_| program.attach(&interface.name, XdpFlags::SKB_MODE))
-            .or_else(|_| {
-                program.attach(
-                    &interface.name,
-                    XdpFlags::SKB_MODE | XdpFlags::UPDATE_IF_NOEXIST,
-                )
-            });
+        // Try native XDP first, then generic SKB mode.
+        let attach_result =
+            program
+                .attach(&interface.name, XdpMode::Driver)
+                .or_else(|driver_error| {
+                    warn!(
+                        "Native XDP attach failed for {}: {}; retrying in SKB mode",
+                        interface.name, driver_error
+                    );
+                    program.attach(&interface.name, XdpMode::Skb)
+                });
 
         match attach_result {
             Ok(_) => {

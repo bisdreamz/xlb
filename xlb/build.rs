@@ -5,7 +5,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
+const XLB_EBPF_TOOLCHAIN: &str = "XLB_EBPF_TOOLCHAIN";
+
 fn main() -> anyhow::Result<()> {
+    println!("cargo:rerun-if-env-changed={XLB_EBPF_TOOLCHAIN}");
+
     let cargo_metadata::Metadata { packages, .. } = cargo_metadata::MetadataCommand::new()
         .no_deps()
         .exec()
@@ -66,7 +70,13 @@ fn build_ebpf_package(name: &str, ebpf_root: &Path) -> anyhow::Result<()> {
         features: &features,
         ..Default::default()
     };
-    aya_build::build_ebpf([package], Toolchain::default())
+    let toolchain = env::var(XLB_EBPF_TOOLCHAIN).ok();
+    let toolchain = match toolchain.as_deref() {
+        Some(toolchain) if !toolchain.is_empty() => Toolchain::Custom(toolchain),
+        _ => Toolchain::default(),
+    };
+
+    aya_build::build_ebpf([package], toolchain)
 }
 
 fn locate_prebuilt_obj(ebpf_root: &Path) -> anyhow::Result<PathBuf> {

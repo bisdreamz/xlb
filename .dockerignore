@@ -1,7 +1,12 @@
 target/
 .git/
+.github/
 .idea/
+.vscode/
+docs/
+helm/
 *.log
 .env
-Dockerfile
-.dockerignore
+.env.*
+Dockerfile*
+docker-compose*

@@ -12,6 +12,7 @@ use xlb_common::types::{Backend, Flow, FlowKeyV4};
 
 pub enum PacketEvent {
     Pass,
+    Drop,
     Reply,
     Forward(Iface),
 }
@@ -56,6 +57,7 @@ impl PacketHandler {
                     port_map.remote_port,
                 )? {
                     TcpOutcome::Pass => Ok(PacketEvent::Pass),
+                    TcpOutcome::Drop => Ok(PacketEvent::Drop),
                     TcpOutcome::Reply => Ok(PacketEvent::Reply),
                     TcpOutcome::Forward(flow) => {
                         packet.reroute(

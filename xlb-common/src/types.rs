@@ -149,10 +149,12 @@ pub struct Flow {
     pub rst_is_src: bool,
     /// The eBPF path observed a missing counterpart while closing this flow.
     pub pair_invalid: bool,
+    /// Both directional entries have been installed and may be reused.
+    pub pair_ready: bool,
     /// Explicit bytes keep the following pair tag aligned without implicit,
     /// potentially uninitialized padding.
     #[doc(hidden)]
-    pub _reserved: [u8; 2],
+    pub _reserved: [u8; 1],
     /// Generation shared by both directional entries of this flow pair.
     pub pair_tag: u32,
 }
@@ -244,7 +246,8 @@ mod tests {
         assert_eq!(core::mem::offset_of!(Flow, fin_is_src), 151);
         assert_eq!(core::mem::offset_of!(Flow, rst_is_src), 152);
         assert_eq!(core::mem::offset_of!(Flow, pair_invalid), 153);
-        assert_eq!(core::mem::offset_of!(Flow, _reserved), 154);
+        assert_eq!(core::mem::offset_of!(Flow, pair_ready), 154);
+        assert_eq!(core::mem::offset_of!(Flow, _reserved), 155);
         assert_eq!(core::mem::offset_of!(Flow, pair_tag), 156);
     }
 

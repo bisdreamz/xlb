@@ -41,6 +41,10 @@ impl<'a> TcpHeader<'a> {
         self.hdr.syn() != 0
     }
 
+    pub fn is_ack(&self) -> bool {
+        self.hdr.ack() != 0
+    }
+
     pub fn is_fin(&self) -> bool {
         self.hdr.fin() != 0
     }
@@ -346,5 +350,11 @@ mod tests {
         assert_eq!(truncated_options.source, 50_000u16.to_be_bytes());
         assert_eq!(truncated_options.dest, 443u16.to_be_bytes());
         assert_eq!(truncated_options.syn(), 1);
+    }
+
+    #[test]
+    fn ack_flag_is_reported_independently_from_syn() {
+        assert!(TcpHeader::new(&mut tcp_header(true, true, false)).is_ack());
+        assert!(!TcpHeader::new(&mut tcp_header(false, true, false)).is_ack());
     }
 }

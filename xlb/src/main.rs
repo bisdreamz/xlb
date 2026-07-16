@@ -9,7 +9,7 @@ use crate::config::{BackendSource, XlbConfig};
 use crate::r#loop::MaintenanceLoop;
 use crate::provider::{BackendProvider, FixedProvider, KubernetesProvider};
 use anyhow::{Context, anyhow};
-use aya::maps::{Array, HashMap};
+use aya::maps::{Array, HashMap, PerCpuArray};
 use log::info;
 use std::sync::Arc;
 use std::time::Duration;
@@ -64,11 +64,16 @@ async fn main() -> anyhow::Result<()> {
         .take_map("FLOW_MAP")
         .ok_or_else(|| anyhow!("Failed to load FLOW_MAP map"))?
         .try_into()?;
+    let flow_pair_invariants: PerCpuArray<_, u64> = ebpf
+        .take_map("FLOW_PAIR_INVARIANTS")
+        .ok_or_else(|| anyhow!("Failed to load FLOW_PAIR_INVARIANTS map"))?
+        .try_into()?;
 
     let maint_loop = MaintenanceLoop::new(
         provider.clone(),
         ebpf_backends,
         ebpf_flows,
+        flow_pair_invariants,
         Duration::from_secs(config.orphan_ttl_secs as u64),
         Duration::from_mins(1),
     );

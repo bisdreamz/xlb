@@ -3,7 +3,7 @@ use crate::r#loop::utils;
 use crate::r#loop::utils::LbFlowStats;
 use crate::metrics;
 use crate::provider::{BackendProvider, hosts_to_backends_with_routes};
-use aya::maps::{Array, HashMap, MapData, MapError};
+use aya::maps::{Array, HashMap, MapData, MapError, PerCpuArray};
 use log::{debug, trace, warn};
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -31,6 +31,8 @@ pub struct MaintenanceLoop {
     ebpf_backends: Array<MapData, Backend>,
     /// Live map of connection flows, see ['Flow']
     ebpf_flows: HashMap<MapData, FlowKeyV4, Flow>,
+    /// Per-CPU count of flow-pair invariant repairs performed in eBPF.
+    flow_pair_invariants: PerCpuArray<MapData, u64>,
     /// If a flow is active longer than this TTL it is considered
     /// to be an orpaned connection (closed w/o fin or rst)
     orphan_ttl: Duration,
@@ -42,6 +44,8 @@ pub struct MaintenanceLoop {
     /// used as a filter for identifying recent events
     /// such as new conns or closures
     last_run_ns: u64,
+    /// Last cumulative dataplane invariant count used to emit metric deltas.
+    last_flow_pair_invariants: u64,
     /// Per-flow tracking for delta calculations: flow_key -> (bytes, packets)
     /// Prevents underflow when flows are deleted and avoids improper
     /// reported bandwidth dips during connection closures
@@ -53,6 +57,7 @@ impl MaintenanceLoop {
         provider: Arc<dyn BackendProvider>,
         ebpf_backends: Array<MapData, Backend>,
         ebpf_flows: HashMap<MapData, FlowKeyV4, Flow>,
+        flow_pair_invariants: PerCpuArray<MapData, u64>,
         orphan_ttl: Duration,
         tcp_time_wait_ttl: Duration,
     ) -> Self {
@@ -61,9 +66,11 @@ impl MaintenanceLoop {
             provider,
             ebpf_backends,
             ebpf_flows,
+            flow_pair_invariants,
             orphan_ttl,
             tcp_time_wait_ttl,
             last_run_ns: 0,
+            last_flow_pair_invariants: 0,
             prev_flow_stats: std::collections::HashMap::new(),
         }
     }
@@ -122,12 +129,29 @@ impl MaintenanceLoop {
         );
 
         metrics::record_connections_orphaned(cleanup.orphans);
-        if cleanup.invariant_violations > 0 {
+        let dataplane_invariants = match self.flow_pair_invariants.get(&0, 0) {
+            Ok(values) => {
+                let total = values
+                    .iter()
+                    .fold(0u64, |sum, count| sum.saturating_add(*count));
+                let delta = total.saturating_sub(self.last_flow_pair_invariants);
+                self.last_flow_pair_invariants = total;
+                delta
+            }
+            Err(err) => {
+                warn!("Failed to read dataplane flow-pair invariant counter: {err}");
+                0
+            }
+        };
+        let invariant_violations = cleanup
+            .invariant_violations
+            .saturating_add(dataplane_invariants);
+        if invariant_violations > 0 {
             warn!(
-                "Detected {} flow-pair invariant violation(s) during cleanup",
-                cleanup.invariant_violations
+                "Detected {} flow-pair invariant violation observation(s) this interval",
+                invariant_violations
             );
-            metrics::record_flow_pair_invariant_violations(cleanup.invariant_violations);
+            metrics::record_flow_pair_invariant_violations(invariant_violations);
         }
 
         self.last_run_ns = now_ns;
@@ -166,11 +190,12 @@ impl MaintenanceLoop {
     }
 }
 
-// Declaration order defines which terminal reason wins when the two halves
-// qualify for different reasons: Reset > Fin > Orphan.
+// Declaration order defines which reason wins when the two halves qualify for
+// different reasons: Reset > Fin > Invalid > Orphan.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum CleanupReason {
     Orphan,
+    Invalid,
     Fin,
     Reset,
 }
@@ -233,7 +258,7 @@ fn plan_pair_cleanup(
     let current_reason = cleanup_reason(flow, now_ns, last_run_ns, orphan_ttl, tcp_time_wait_ttl)
         .or_else(|| {
             flow.pair_invalid
-                .then(|| terminal_marker_reason(flow).unwrap_or(CleanupReason::Orphan))
+                .then(|| terminal_marker_reason(flow).unwrap_or(CleanupReason::Invalid))
         });
 
     let reciprocal_counter = counter_flow.filter(|counter| {
@@ -322,6 +347,7 @@ fn prune_orphaned_or_closed(
                 CleanupReason::Fin => summary.fins += 1,
                 CleanupReason::Reset => summary.resets += 1,
                 CleanupReason::Orphan => summary.orphans += 1,
+                CleanupReason::Invalid => {}
             }
         } else {
             summary.invariant_violations += 1;
@@ -407,7 +433,8 @@ mod tests {
             fin_is_src: false,
             rst_is_src: false,
             pair_invalid: false,
-            _reserved: [0; 2],
+            pair_ready: true,
+            _reserved: [0; 1],
             pair_tag: 1,
         }
     }
@@ -507,6 +534,18 @@ mod tests {
         let cleanup = plan(server_key, &server, Some(&client)).expect("marked pair should clean");
 
         assert_eq!(cleanup.counter_key, Some(client_key));
+        assert!(cleanup.invariant_violation);
+    }
+
+    #[test]
+    fn pair_invalid_without_tcp_close_is_not_counted_as_an_orphan() {
+        let (server_key, client_key) = keys();
+        let mut server = flow(FlowDirection::ToServer, client_key);
+        server.pair_invalid = true;
+
+        let cleanup = plan(server_key, &server, None).expect("marked survivor should clean");
+
+        assert_eq!(cleanup.reason, CleanupReason::Invalid);
         assert!(cleanup.invariant_violation);
     }
 

@@ -1,4 +1,4 @@
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct Iface {
     pub idx: u16,
     pub mac: [u8; 6],

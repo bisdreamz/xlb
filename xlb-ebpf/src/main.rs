@@ -74,6 +74,7 @@ pub fn xlb(ctx: XdpContext) -> u32 {
 
                     xdp_action::XDP_PASS
                 }
+                PacketEvent::Drop => xdp_action::XDP_DROP,
                 PacketEvent::Reply => {
                     packet_log_trace!(packet, "Handle reply");
 

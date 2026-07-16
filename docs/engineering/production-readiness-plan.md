@@ -372,10 +372,14 @@ Requirements:
 - Use `BPF_NOEXIST` for pair installation rather than silent overwrite.
 - Roll back the first insert on any second-insert failure, including map-full
   errors and reverse-key races.
-- If another CPU wins the forward insertion, do not choose a second backend.
-  Reuse the winner when its pair is complete. If the winner is still between
-  its two inserts, use an explicit initializing state/bounded retry/drop policy;
-  do not misclassify the transient as corruption and delete the winner.
+- If another CPU wins the forward insertion, never install or forward the
+  loser's selected backend; reuse the winner when its pair is complete. Backend
+  selection happens before the `BPF_NOEXIST` reservation, so simultaneous first
+  SYNs can advance round-robin more than once even though only one recipe wins.
+  This negligible selection skew avoids a second reservation map/lock. If the
+  winner is still between its two inserts, use an explicit initializing
+  state/bounded retry/drop policy; do not misclassify the transient as
+  corruption and delete the winner.
 - If reverse-port insertion loses a race, remove only entries installed by the
   losing attempt and retry allocation within a bounded verifier-safe loop.
 - Pair cleanup and this transactional creation work should land in the same PR
@@ -392,6 +396,22 @@ Mandatory SYN tests:
 - Second-insert failure removes the first entry.
 - Two concurrent identical SYNs converge on one complete pair.
 - Reverse-port allocation races do not leak entries.
+
+Current validation boundary (July 2026): host-side tests cover the SYN/ACK
+admission guard, complete/terminal/incomplete pair classification, initializing
+state policy, and publication rejection for every FIN/RST/invariant marker. A
+locked release build also verifies that the real eBPF object links, both map
+updates use `BPF_NOEXIST`, `Flow` remains padding-free at 160 bytes, and compiled
+BPF stack offsets remain below the 512-byte limit.
+
+The current host test environment cannot mutate an Aya eBPF map or schedule two
+real XDP executions concurrently. The following map-level cases remain an
+explicit temporary test waiver, not claimed coverage: stable backend/translation
+on retransmission, unchanged entry count, rollback after the second insert
+fails, convergence of simultaneous identical SYNs, and reverse-key-race leak
+freedom. Add those cases with the deferred privileged BPF/XDP harness in
+`tcp-test-foundations`; do not add a large mock state machine merely to imitate
+kernel map semantics in this branch.
 
 ## TCP timeout and half-open policy
 
@@ -866,7 +886,7 @@ next branch. Do not mix opportunistic cleanup into a TCP correctness branch.
 | 9 | `tcp-rst-packet-construction` | Shared TTL/IHL/checksum/sequence and pointer-order safety | Implemented and independently reviewed |
 | 10 | `ephemeral-rst-outcome` | Explicit TCP outcome and port-exhaustion `XDP_TX` fix | Implemented and independently reviewed |
 | 11 | `tcp-pair-cleanup` | Pair-wide expiry/closure and invariant accounting | Implemented and independently reviewed |
-| 12 | `tcp-syn-idempotency` | SYN-only guard, retransmission reuse, terminal eviction, transactional inserts | Planned; merge immediately after pair cleanup review |
+| 12 | `tcp-syn-idempotency` | SYN-only guard, retransmission reuse, terminal eviction, transactional inserts | Implemented and independently reviewed; privileged map-race coverage deferred under item 6 |
 | 13 | `unsupported-config-packets` | Reject UDP/DSR/IPv6 config; safe IPv4 option/fragment policy | Planned |
 | 14 | `endpoint-slice-discovery` | Shared nullable-condition model and both consumers | Planned |
 | 15 | `status-health-api` | `StatusSnapshot`, `/healthz`, `/readyz`, JSON and mini status page | Planned |

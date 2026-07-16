@@ -45,7 +45,9 @@ pub fn init(meter: &Meter) -> Result<()> {
 
         flow_pair_invariant_violations: meter
             .u64_counter("xlb.global.flow_pair.invariant_violations")
-            .with_description("Missing, mismatched, or concurrently removed flow-pair entries")
+            .with_description(
+                "Observations of missing, mismatched, or concurrently removed flow-pair entries",
+            )
             .build(),
     };
 

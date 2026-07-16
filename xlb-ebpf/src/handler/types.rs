@@ -15,6 +15,8 @@ pub struct PacketFlow {
 pub enum TcpOutcome {
     /// Leave the packet unchanged for the kernel networking stack.
     Pass,
+    /// Silently discard a packet during a transient flow-state race.
+    Drop,
     /// Transmit the packet back through its ingress interface.
     Reply,
     /// Rewrite and redirect the packet using the stored flow recipe.

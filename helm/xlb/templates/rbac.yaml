@@ -1,27 +1,30 @@
-{{- if .Values.serviceAccount.create -}}
+{{- if and .Values.serviceAccount.create .Values.config.provider.kubernetes -}}
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+kind: Role
 metadata:
   name: {{ include "xlb.fullname" . }}
+  namespace: {{ .Values.config.provider.kubernetes.namespace }}
   labels:
     {{- include "xlb.labels" . | nindent 4 }}
 rules:
 - apiGroups: [""]
   resources: ["services"]
+  resourceNames: [{{ .Values.config.provider.kubernetes.service | quote }}]
   verbs: ["get"]
 - apiGroups: [""]
   resources: ["pods"]
   verbs: ["list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
+kind: RoleBinding
 metadata:
   name: {{ include "xlb.fullname" . }}
+  namespace: {{ .Values.config.provider.kubernetes.namespace }}
   labels:
     {{- include "xlb.labels" . | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
+  kind: Role
   name: {{ include "xlb.fullname" . }}
 subjects:
 - kind: ServiceAccount

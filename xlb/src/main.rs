@@ -27,11 +27,11 @@ async fn main() -> anyhow::Result<()> {
 
     info!("Config {:?}", config);
 
-    if let Some(otel_config) = &config.otel {
-        if otel_config.enabled {
-            let service_name = config.name.clone().unwrap_or_else(|| "xlb".to_string());
-            metrics::init(otel_config, service_name)?;
-        }
+    if let Some(otel_config) = &config.otel
+        && otel_config.enabled
+    {
+        let service_name = config.name.clone().unwrap_or_else(|| "xlb".to_string());
+        metrics::init(otel_config, service_name)?;
     }
 
     let provider: Arc<dyn BackendProvider> = match &config.provider {

@@ -95,7 +95,7 @@ pub fn init(config: &OtelConfig, service_name: String) -> Result<()> {
 }
 
 /// Export otel for global, ingress, and egress metrics
-pub fn log_metrics(stats: &LbFlowStats, backends: &Vec<Host>) {
+pub fn log_metrics(stats: &LbFlowStats, backends: &[Host]) {
     global::log_global(stats, backends);
     ingress::log_ingress(stats);
     egress::log_egress(stats);

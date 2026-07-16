@@ -29,7 +29,7 @@ pub async fn populate_backend_route(backend: &mut Backend) -> Result<()> {
 
     // Ask the kernel how to reach this IP
     let output = Command::new("ip")
-        .args(&["route", "get", &backend_ip.to_string()])
+        .args(["route", "get", &backend_ip.to_string()])
         .output()?;
 
     if !output.status.success() {
@@ -61,7 +61,7 @@ pub async fn populate_backend_route(backend: &mut Backend) -> Result<()> {
             // No neighbor entry yet, so ping to populate it
             warn!("No neighbor entry for {}, attempting ping", next_hop_ip);
             let _ = Command::new("ping")
-                .args(&["-c", "1", "-W", "1", &next_hop_ip.to_string()])
+                .args(["-c", "1", "-W", "1", &next_hop_ip.to_string()])
                 .output();
 
             // Give the kernel a moment to update the neighbor table
@@ -111,12 +111,11 @@ fn parse_src_ip_from_route(output: &str) -> Result<IpAddr> {
 /// Works for both IPv4 and IPv6.
 fn parse_via_from_route(output: &str) -> Option<IpAddr> {
     for (i, part) in output.split_whitespace().enumerate() {
-        if part == "via" {
-            if let Some(gateway_str) = output.split_whitespace().nth(i + 1) {
-                if let Ok(gateway_ip) = gateway_str.parse::<IpAddr>() {
-                    return Some(gateway_ip);
-                }
-            }
+        if part == "via"
+            && let Some(gateway_str) = output.split_whitespace().nth(i + 1)
+            && let Ok(gateway_ip) = gateway_str.parse::<IpAddr>()
+        {
+            return Some(gateway_ip);
         }
     }
     None
@@ -129,10 +128,10 @@ fn parse_via_from_route(output: &str) -> Option<IpAddr> {
 /// Returns: "eth1"
 fn parse_dev_from_route(output: &str) -> Result<String> {
     for (i, part) in output.split_whitespace().enumerate() {
-        if part == "dev" {
-            if let Some(dev_name) = output.split_whitespace().nth(i + 1) {
-                return Ok(dev_name.to_string());
-            }
+        if part == "dev"
+            && let Some(dev_name) = output.split_whitespace().nth(i + 1)
+        {
+            return Ok(dev_name.to_string());
         }
     }
     Err(anyhow!("No device found in route output"))
@@ -146,7 +145,7 @@ fn parse_dev_from_route(output: &str) -> Result<String> {
 /// Returns: 7
 fn get_ifindex(dev_name: &str) -> Result<u32> {
     let output = Command::new("ip")
-        .args(&["link", "show", dev_name])
+        .args(["link", "show", dev_name])
         .output()?;
 
     if !output.status.success() {
@@ -171,10 +170,10 @@ fn get_interface_mac(dev_name: &str) -> Result<[u8; 6]> {
     let interfaces = default_net::get_interfaces();
 
     for iface in interfaces {
-        if iface.name == dev_name {
-            if let Some(mac) = iface.mac_addr {
-                return Ok(mac.octets());
-            }
+        if iface.name == dev_name
+            && let Some(mac) = iface.mac_addr
+        {
+            return Ok(mac.octets());
         }
     }
 
@@ -191,7 +190,7 @@ fn get_interface_mac(dev_name: &str) -> Result<[u8; 6]> {
 /// Works for both IPv4 (ARP) and IPv6 (NDP).
 fn get_arp_entry(ip: &IpAddr) -> Result<[u8; 6]> {
     let output = Command::new("ip")
-        .args(&["neigh", "show", &ip.to_string()])
+        .args(["neigh", "show", &ip.to_string()])
         .output()?;
 
     if !output.status.success() {
@@ -201,10 +200,10 @@ fn get_arp_entry(ip: &IpAddr) -> Result<[u8; 6]> {
     let neigh_output = String::from_utf8_lossy(&output.stdout);
 
     for (i, part) in neigh_output.split_whitespace().enumerate() {
-        if part == "lladdr" {
-            if let Some(mac_str) = neigh_output.split_whitespace().nth(i + 1) {
-                return parse_mac(mac_str);
-            }
+        if part == "lladdr"
+            && let Some(mac_str) = neigh_output.split_whitespace().nth(i + 1)
+        {
+            return parse_mac(mac_str);
         }
     }
 

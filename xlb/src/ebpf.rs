@@ -19,9 +19,7 @@ pub fn to_ebpf_config(cfg: &XlbConfig, iface: &ListenIface) -> EbpfConfig {
         local_port: 0,
         remote_port: 0,
     }; 8];
-    for i in 0..cfg.ports.len() {
-        port_mappings[i] = cfg.ports[i];
-    }
+    port_mappings[..cfg.ports.len()].copy_from_slice(&cfg.ports);
 
     EbpfConfig {
         strategy: Strategy::RoundRobin,

@@ -75,7 +75,7 @@ pub fn record_connections_orphaned(count: u64) {
 }
 
 /// Record global metrics (no backend-specific labels)
-pub fn log_global(stats: &LbFlowStats, backends: &Vec<Host>) {
+pub fn log_global(stats: &LbFlowStats, backends: &[Host]) {
     let Some(m) = METRICS.get() else { return };
 
     m.backends_available.record(backends.len() as u64, &[]);

@@ -30,50 +30,50 @@ impl AggregateFlowStats {
     }
 }
 
-fn add_flow_stats(
-    flow: &Flow,
-    metrics: &mut Metrics,
-    direction: &FlowDirection,
-    conn_is_new: bool,
-    conn_is_rst: bool,
-    conn_is_fin: bool,
-    conn_is_orphan: bool,
-    conn_is_active: bool,
-) {
-    if conn_is_new {
+#[derive(Clone, Copy)]
+struct FlowObservation {
+    is_new: bool,
+    is_rst: bool,
+    is_fin: bool,
+    is_orphaned: bool,
+    is_active: bool,
+}
+
+fn add_flow_stats(flow: &Flow, metrics: &mut Metrics, observation: FlowObservation) {
+    if observation.is_new {
         metrics.new_conns += 1;
     }
 
-    if conn_is_fin && flow.fin_is_src {
-        match direction {
+    if observation.is_fin && flow.fin_is_src {
+        match flow.direction {
             ToClient => metrics.closed_fin_by_server += 1,
             FlowDirection::ToServer => metrics.closed_fin_by_client += 1,
         }
 
         metrics.closed_total_conns += 1;
-    } else if conn_is_rst && flow.rst_is_src {
-        match direction {
+    } else if observation.is_rst && flow.rst_is_src {
+        match flow.direction {
             ToClient => metrics.closed_rsts_by_server += 1,
             FlowDirection::ToServer => metrics.closed_rsts_by_client += 1,
         }
         metrics.closed_total_conns += 1;
-    } else if conn_is_orphan {
+    } else if observation.is_orphaned {
         metrics.orphaned_conns += 1;
     }
 
-    if conn_is_active {
+    if observation.is_active {
         metrics.active_conns += 1;
     }
 }
 
-pub fn aggregate_flow_stats<'a>(
+pub fn aggregate_flow_stats(
     event_ns: u64,
     flows: impl Iterator<Item = (FlowKeyV4, Flow)>,
     prev_flow_stats: &HashMap<FlowKeyV4, (u64, u64)>,
     orphan_ttl: &Duration,
     now_ns: u64,
 ) -> (LbFlowStats, HashMap<FlowKeyV4, (u64, u64)>) {
-    let mut backends_map = HashMap::new();
+    let mut backends_map: HashMap<u128, AggregateFlowStats> = HashMap::new();
     let mut totals = AggregateFlowStats::default();
     let mut new_prev_flow_stats = HashMap::new();
 
@@ -91,41 +91,22 @@ pub fn aggregate_flow_stats<'a>(
 
         new_prev_flow_stats.insert(key, (flow.bytes_transfer, flow.packets_transfer));
 
-        let backend = backends_map
-            .entry(flow.backend_ip)
-            .or_insert_with(|| AggregateFlowStats::default());
+        let backend = backends_map.entry(flow.backend_ip).or_default();
 
-        let is_new = flow.created_at_ns > event_ns;
-        // record RSTs & FINs as they happen during our tick for metrics,
-        // which may differ from when we clean them from the
-        // officialy from the conn track e.g. for time wait
-        let is_rst = flow.rst_ns >= event_ns && flow.rst_ns <= now_ns;
-        let is_fin = flow.fin_both_ns >= event_ns && flow.fin_both_ns <= now_ns;
+        // Count RST and FIN transitions in the interval where they occur.
+        // Cleanup may retain terminal mappings through TCP TIME_WAIT.
         let is_orphaned = is_orphan(flow.last_seen_ns, now_ns, orphan_ttl);
-        let is_active = is_active(&flow) && !is_orphaned;
+        let observation = FlowObservation {
+            is_new: flow.created_at_ns > event_ns,
+            is_rst: flow.rst_ns >= event_ns && flow.rst_ns <= now_ns,
+            is_fin: flow.fin_both_ns >= event_ns && flow.fin_both_ns <= now_ns,
+            is_orphaned,
+            is_active: is_active(&flow) && !is_orphaned,
+        };
 
         if flow.direction == ToClient {
-            add_flow_stats(
-                &flow,
-                &mut totals.to_client,
-                &flow.direction,
-                is_new,
-                is_rst,
-                is_fin,
-                is_orphaned,
-                is_active,
-            );
-
-            add_flow_stats(
-                &flow,
-                &mut backend.to_client,
-                &flow.direction,
-                is_new,
-                is_rst,
-                is_fin,
-                is_orphaned,
-                is_active,
-            );
+            add_flow_stats(&flow, &mut totals.to_client, observation);
+            add_flow_stats(&flow, &mut backend.to_client, observation);
 
             let mbps = (delta_bytes as f64 * 8.0) / delta_secs / 1_000_000.0;
             let pps = delta_packets as f64 / delta_secs;
@@ -139,27 +120,8 @@ pub fn aggregate_flow_stats<'a>(
             continue;
         }
 
-        add_flow_stats(
-            &flow,
-            &mut totals.to_server,
-            &flow.direction,
-            is_new,
-            is_rst,
-            is_fin,
-            is_orphaned,
-            is_active,
-        );
-
-        add_flow_stats(
-            &flow,
-            &mut backend.to_server,
-            &flow.direction,
-            is_new,
-            is_rst,
-            is_fin,
-            is_orphaned,
-            is_active,
-        );
+        add_flow_stats(&flow, &mut totals.to_server, observation);
+        add_flow_stats(&flow, &mut backend.to_server, observation);
 
         let mbps = (delta_bytes as f64 * 8.0) / delta_secs / 1_000_000.0;
         let pps = delta_packets as f64 / delta_secs;
@@ -170,7 +132,7 @@ pub fn aggregate_flow_stats<'a>(
         backend.to_server.packets_per_second += pps;
         backend.to_server.bytes_transferred += delta_bytes;
 
-        if is_active {
+        if observation.is_active {
             totals.add_client(flow.client_ip);
             backend.add_client(flow.client_ip);
         }
@@ -210,7 +172,7 @@ pub fn rst_ready_for_cleanup(rst_ns: u64, last_run_ns: u64) -> bool {
 /// Returns true if the fin both timestamp was at least time_wait duration ago
 /// and both sides of the flow are marked closed
 pub fn fin_ready_for_cleanup(fin_both_ns: u64, now_ns: u64, time_wait_ttl: &Duration) -> bool {
-    fin_both_ns > 0 && Duration::from_nanos(now_ns.saturating_sub(fin_both_ns)).ge(&time_wait_ttl)
+    fin_both_ns > 0 && Duration::from_nanos(now_ns.saturating_sub(fin_both_ns)).ge(time_wait_ttl)
 }
 
 /// Gets the current monotonic timestamp in nanoseconds,

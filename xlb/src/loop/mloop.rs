@@ -115,7 +115,7 @@ impl MaintenanceLoop {
         let empty_backend = Backend::default();
         for i in new_backends.len() as u32..consts::MAX_BACKENDS {
             self.ebpf_backends
-                .set(i, &empty_backend.clone(), 0)
+                .set(i, empty_backend, 0)
                 .expect("Failed to set empty sentinel backend!");
         }
         trace!("Updated {} backends", new_backends.len());

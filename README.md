@@ -19,7 +19,8 @@ cargo install cargo-binstall --locked
 cargo binstall bpf-linker@0.10.4
 
 # Documentation (optional)
-pipx install mkdocs-material
+pipx install mkdocs
+pipx inject mkdocs mkdocs-material
 pipx install json-schema-for-humans
 ```
 

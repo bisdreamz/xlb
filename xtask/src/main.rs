@@ -55,7 +55,9 @@ fn generate_docs() -> Result<()> {
         .arg("-f")
         .arg("docs/mkdocs.yml")
         .status()
-        .context("failed to start mkdocs; install it with `pipx install mkdocs-material`")?;
+        .context(
+            "failed to start mkdocs; run `pipx install mkdocs` and `pipx inject mkdocs mkdocs-material`",
+        )?;
     if !status.success() {
         bail!("mkdocs --strict failed with {status}");
     }

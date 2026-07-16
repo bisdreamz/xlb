@@ -401,12 +401,12 @@ Current defaults/behavior:
 - Post-bidirectional-FIN TIME_WAIT retention: 60 seconds in userspace.
 - Independent activity timestamps exist for each direction.
 
-Treat 300 seconds as the minimum supported orphan idle timeout for the initial
-product, not only the default. Reject lower values during configuration loading
-with a clear error, reflect the minimum in the generated schema and deployment
-documentation, and keep Helm's default at 300 seconds. A previously observed
-30-second setting expired valid idle connections and caused resumed traffic to
-hit the missing-flow path continuously.
+Treat 300 seconds as the effective minimum orphan idle timeout for the initial
+product, not only the default. Normalize lower values to 300 during configuration
+loading and emit one clear startup warning rather than failing startup. Document
+the normalization policy and keep Helm's default at 300 seconds. A previously
+observed 30-second setting expired valid idle connections and caused resumed
+traffic to hit the missing-flow path continuously.
 
 An expired/missing flow is an expected dataplane condition and must not emit an
 eBPF warning for every subsequent packet. Per-packet Aya warnings are delivered,
@@ -849,14 +849,15 @@ Logical dependencies do not imply one combined implementation branch. Keep each
 branch narrowly reviewable, use focused commits inside it, and merge branches in
 dependency order. Every branch requires its focused tests, a release build where
 applicable, a written peer review, and resolution of all blocking findings before
-merge. Do not mix opportunistic cleanup into a TCP correctness branch.
+merge. Merge and push it to `main`, then delete the branch before starting the
+next branch. Do not mix opportunistic cleanup into a TCP correctness branch.
 
 | Order | Branch | Scope | Status |
 | --- | --- | --- | --- |
 | 1 | `docker-update-07-2026` | Container/runtime modernization only | Implemented and independently reviewed |
 | 2 | `dependency-refresh-07-2026` | Lockfile refresh only | Implemented and independently reviewed |
 | 3 | `kube-watcher-hygiene` | `deletionTimestamp`, watcher snapshot reconciliation, current Pod RBAC | Implemented and independently reviewed |
-| 4 | `orphan-timeout-guard` | 300-second config/schema floor and expired-flow log-storm guard | Implemented and independently reviewed |
+| 4 | `orphan-timeout-clamp` | Warning-and-clamp 300-second floor and expired-flow log-storm guard | Implemented; review pending |
 | 5 | `docs-update-07-2026` | Accurate public docs, strict generation, and this durable plan | Implemented and independently reviewed |
 | 6 | `tcp-test-foundations` | Host-side packet/state tests and reusable privileged netns/veth harness | Planned |
 | 7 | `tcp-flow-key-v4` | Exact map key and tuple identity only | Planned |

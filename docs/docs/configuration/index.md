@@ -142,12 +142,13 @@ Connections without FIN/RST are cleaned up after this period:
 orphan_ttl_secs: 300
 ```
 
-The minimum accepted value is 300 seconds. XLB rejects shorter values at startup because they can
-expire otherwise healthy, temporarily idle TCP connections. TCP keepalive packets and any other
-packet activity refresh the flow, but keepalive timing itself is configured by the endpoints and is
-not negotiated in the TCP handshake. Endpoints that need to retain longer-lived idle connections
-must send TCP keepalives or application traffic more frequently than `orphan_ttl_secs`; deployments
-may set a higher timeout when that is not possible.
+The effective minimum is 300 seconds. If a shorter value is configured, XLB logs one startup warning
+and raises it to 300 rather than failing startup. This avoids expiring otherwise healthy,
+temporarily idle TCP connections. TCP keepalive packets and any other packet activity refresh the
+flow, but keepalive timing itself is configured by the endpoints and is not negotiated in the TCP
+handshake. Endpoints that need to retain longer-lived idle connections must send TCP keepalives or
+application traffic more frequently than `orphan_ttl_secs`; deployments may set a higher timeout
+when that is not possible.
 
 **Use cases:**
 - Scanner connections that never close

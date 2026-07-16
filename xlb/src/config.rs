@@ -100,9 +100,9 @@ pub struct XlbConfig {
     pub mode: RoutingMode,
     /// The duration by which an inactive flow,
     /// which has not seen any closure, is considered
-    /// orphaned. Must be at least five minutes.
+    /// orphaned. Values below five minutes are raised
+    /// to five minutes at startup.
     #[serde(default = "default_orphan_ttl_secs")]
-    #[schemars(range(min = "MIN_ORPHAN_TTL_SECS"))]
     pub orphan_ttl_secs: u32,
     /// Reactive grace period after a shutdown signal.
     /// Matching TCP packets that arrive during this
@@ -125,7 +125,7 @@ const fn default_shutdown_timeout() -> u32 {
 
 impl XlbConfig {
     pub fn load(path: PathBuf) -> Result<XlbConfig> {
-        let config = Config::builder()
+        let mut config = Config::builder()
             .add_source(config::File::from(path.to_path_buf()))
             .build()?
             .try_deserialize::<XlbConfig>()?;
@@ -134,18 +134,23 @@ impl XlbConfig {
             bail!("Number of port mappings must be between 1 and 8");
         }
 
-        validate_orphan_ttl_secs(config.orphan_ttl_secs)?;
+        config.orphan_ttl_secs = normalize_orphan_ttl_secs(config.orphan_ttl_secs);
 
         Ok(config)
     }
 }
 
-fn validate_orphan_ttl_secs(orphan_ttl_secs: u32) -> Result<()> {
+fn normalize_orphan_ttl_secs(orphan_ttl_secs: u32) -> u32 {
     if orphan_ttl_secs < MIN_ORPHAN_TTL_SECS {
-        bail!("orphan_ttl_secs must be at least {MIN_ORPHAN_TTL_SECS} seconds (5 minutes)");
+        log::warn!(
+            "orphan_ttl_secs={} is below the safe minimum; enforcing {} seconds (5 minutes)",
+            orphan_ttl_secs,
+            MIN_ORPHAN_TTL_SECS
+        );
+        MIN_ORPHAN_TTL_SECS
+    } else {
+        orphan_ttl_secs
     }
-
-    Ok(())
 }
 
 #[cfg(test)]
@@ -183,7 +188,7 @@ shutdown_timeout: 15
     }
 
     #[test]
-    fn schema_advertises_orphan_ttl_minimum() {
+    fn schema_allows_values_below_effective_orphan_ttl_minimum() {
         let schema = schema_for!(XlbConfig);
         let properties = schema
             .schema
@@ -201,37 +206,34 @@ shutdown_timeout: 15
                 .number
                 .expect("orphan TTL has numeric validation")
                 .minimum,
-            Some(f64::from(MIN_ORPHAN_TTL_SECS))
+            Some(0.0)
         );
     }
 
     #[test]
-    fn rejects_orphan_ttl_below_five_minutes() {
-        let error = validate_orphan_ttl_secs(MIN_ORPHAN_TTL_SECS - 1)
-            .expect_err("short orphan TTL must be rejected");
-
+    fn raises_orphan_ttl_below_five_minutes() {
         assert_eq!(
-            error.to_string(),
-            "orphan_ttl_secs must be at least 300 seconds (5 minutes)"
+            normalize_orphan_ttl_secs(MIN_ORPHAN_TTL_SECS - 1),
+            MIN_ORPHAN_TTL_SECS
         );
     }
 
     #[test]
-    fn accepts_five_minute_orphan_ttl() {
-        validate_orphan_ttl_secs(MIN_ORPHAN_TTL_SECS)
-            .expect("five-minute orphan TTL must be accepted");
+    fn preserves_orphan_ttl_at_or_above_five_minutes() {
+        assert_eq!(
+            normalize_orphan_ttl_secs(MIN_ORPHAN_TTL_SECS),
+            MIN_ORPHAN_TTL_SECS
+        );
+        assert_eq!(normalize_orphan_ttl_secs(900), 900);
     }
 
     #[test]
-    fn load_rejects_orphan_ttl_below_five_minutes() {
+    fn load_raises_orphan_ttl_below_five_minutes() {
         let yaml = format!("{MINIMAL_CONFIG}\norphan_ttl_secs: 299\n");
-        let error = load_test_config("short-orphan-ttl", &yaml)
-            .expect_err("short orphan TTL must fail config loading");
+        let config = load_test_config("short-orphan-ttl", &yaml)
+            .expect("short orphan TTL must be normalized during config loading");
 
-        assert_eq!(
-            error.to_string(),
-            "orphan_ttl_secs must be at least 300 seconds (5 minutes)"
-        );
+        assert_eq!(config.orphan_ttl_secs, MIN_ORPHAN_TTL_SECS);
     }
 
     #[test]

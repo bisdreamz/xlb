@@ -51,7 +51,7 @@
 | - [listen](#listen )                     | No      | object           | No         | In         | The IP address to "listen" on which is the expected dest IP value for inbound packets of interest. Default to auto which will pick the primary address of the interface associated with the default route. |
 | - [mode](#mode )                         | No      | object           | No         | In         | Routing mode of either nat or dsr, presently only nat is supported                                                                                                                                         |
 | - [name](#name )                         | No      | string or null   | No         | -          | Optional service name attached to OTEL metrics. Defaults to "xlb" when omitted.                                                                                                                            |
-| - [orphan_ttl_secs](#orphan_ttl_secs )   | No      | integer          | No         | -          | The duration by which an inactive flow, which has not seen any closure, is considered orphaned. Must be at least five minutes.                                                                              |
+| - [orphan_ttl_secs](#orphan_ttl_secs )   | No      | integer          | No         | -          | The duration by which an inactive flow, which has not seen any closure, is considered orphaned. Values below five minutes are raised to five minutes at startup.                                             |
 | - [otel](#otel )                         | No      | Combination      | No         | -          | Optional OpenTelemetry metrics configuration                                                                                                                                                               |
 | + [ports](#ports )                       | No      | array            | No         | -          | The port mappings of inbound to backend dest ports. E.g. [80 -> 8080], [443 -> 443]                                                                                                                        |
 | - [proto](#proto )                       | No      | enum (of string) | No         | In         | The target protocol to proxy to the backends e.g. tcp or udp                                                                                                                                               |
@@ -167,11 +167,11 @@ Must be one of:
 | **Format**   | `uint32`  |
 | **Default**  | `300`     |
 
-**Description:** The duration by which an inactive flow, which has not seen any closure, is considered orphaned. Must be at least five minutes.
+**Description:** The duration by which an inactive flow, which has not seen any closure, is considered orphaned. Values below five minutes are raised to five minutes at startup.
 
 | Restrictions |     |
 | ------------ | --- |
-| **Minimum**  | 300 |
+| **Minimum**  | 0   |
 
 ## <a name="otel"></a>5. Property `XlbConfig > otel`
 

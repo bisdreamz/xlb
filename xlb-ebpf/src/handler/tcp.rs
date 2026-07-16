@@ -41,7 +41,17 @@ pub fn handle_tcp_packet(
         _ => unsafe { core::hint::unreachable_unchecked() },
     };
 
-    if tcp.is_syn() && *direction == FlowDirection::ToServer {
+    let (tcp_syn, tcp_fin, tcp_rst) = (tcp.is_syn(), tcp.is_fin(), tcp.is_rst());
+
+    // RST takes precedence over every other control flag. In particular, a
+    // malformed SYN|RST must not create a flow, and FIN|RST is an immediate
+    // reset rather than an orderly close.
+    if tcp_rst {
+        close_flow(packet, direction, false, true, flow_map)?;
+        return existing_flow(packet, direction, flow_map);
+    }
+
+    if tcp_syn && *direction == FlowDirection::ToServer {
         packet_log_debug!(packet, "New TCP SYN");
         let next_backend =
             balancing::select_backend(strategy, backends).ok_or(XlbErr::ErrNoBackends)?;
@@ -56,10 +66,9 @@ pub fn handle_tcp_packet(
         };
     }
 
-    let (tcp_fin, tcp_rst) = (tcp.is_fin(), tcp.is_rst());
-    if tcp_fin || tcp_rst {
+    if tcp_fin {
         // record flow state but continue to process
-        close_flow(packet, direction, tcp_fin, tcp_rst, flow_map)?;
+        close_flow(packet, direction, true, false, flow_map)?;
     }
 
     existing_flow(packet, direction, flow_map)

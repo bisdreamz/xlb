@@ -1,3 +1,4 @@
+mod cleanup;
 mod metrics;
 mod mloop;
 pub(crate) mod utils;

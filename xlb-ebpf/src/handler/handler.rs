@@ -1,4 +1,5 @@
 use crate::handler::iface::Iface;
+use crate::handler::types::TcpOutcome;
 use crate::handler::{tcp, utils};
 use crate::net::eth::MacAddr;
 use crate::net::packet::Packet;
@@ -11,7 +12,7 @@ use xlb_common::types::{Backend, Flow};
 
 pub enum PacketEvent {
     Pass,
-    Return,
+    Reply,
     Forward(Iface),
 }
 
@@ -43,10 +44,10 @@ impl PacketHandler {
                     packet_log_debug!(packet, "Shutting down, attempting to send RST");
                     packet.rst()?;
 
-                    return Ok(PacketEvent::Return);
+                    return Ok(PacketEvent::Reply);
                 }
 
-                let packet_flow = match tcp::handle_tcp_packet(
+                match tcp::handle_tcp_packet(
                     packet,
                     &direction,
                     backends,
@@ -54,20 +55,21 @@ impl PacketHandler {
                     &config.strategy,
                     port_map.remote_port,
                 )? {
-                    Some(flow) => flow,
-                    None => return Ok(PacketEvent::Pass),
-                };
+                    TcpOutcome::Pass => Ok(PacketEvent::Pass),
+                    TcpOutcome::Reply => Ok(PacketEvent::Reply),
+                    TcpOutcome::Forward(flow) => {
+                        packet.reroute(
+                            &MacAddr::new(flow.src_mac),
+                            &MacAddr::new(flow.dst_mac),
+                            flow.src_ip,
+                            flow.dst_ip,
+                            flow.src_port,
+                            flow.dst_port,
+                        )?;
 
-                packet.reroute(
-                    &MacAddr::new(packet_flow.src_mac),
-                    &MacAddr::new(packet_flow.dst_mac),
-                    packet_flow.src_ip,
-                    packet_flow.dst_ip,
-                    packet_flow.src_port,
-                    packet_flow.dst_port,
-                )?;
-
-                Ok(PacketEvent::Forward(packet_flow.iface))
+                        Ok(PacketEvent::Forward(flow.iface))
+                    }
+                }
             }
             _ => Ok(PacketEvent::Pass),
         }

@@ -1,6 +1,6 @@
 use crate::balancing;
 use crate::handler::iface::Iface;
-use crate::handler::types::PacketFlow;
+use crate::handler::types::{PacketFlow, TcpOutcome};
 use crate::handler::utils;
 use crate::net::packet::Packet;
 use crate::net::types::ProtoHeader;
@@ -11,23 +11,15 @@ use xlb_common::XlbErr;
 use xlb_common::config::ebpf::Strategy;
 use xlb_common::types::{Backend, Flow, FlowDirection, FlowKey};
 
-/// Process load balancing of a TCP packet, which
-/// handles required rewriting and backend selection
+/// Process TCP flow state, backend selection, and packet disposition.
 ///
 /// # Arguments
-/// * 'packet' - The mutable packet which will
-/// be re-written and ready for XDP_TRANSFER
-/// * 'direction' - The detected ['FlowDirection'] of
-/// this packet.
-/// * 'backends' - The currently available ['Backend']
-/// options for the backend selection strategy to
-/// choose from
-/// * 'strategy' - The ['Strategy'] configured for
-/// backend selection.
-/// * 'dest_map_port' - The re-mapped service
-/// port when forwarding to the backend,
-/// e.g. lb service port may be 80 to the client but
-/// dest map port is 8080 on the backend.
+/// - `packet`: Packet being classified or rewritten.
+/// - `direction`: Detected [`FlowDirection`] for this packet.
+/// - `backends`: Backends available to the selection strategy.
+/// - `strategy`: Configured backend selection strategy.
+/// - `port_map_dest`: Backend destination port; for example, client-facing
+///   port 80 may map to backend port 8080.
 pub fn handle_tcp_packet(
     packet: &mut Packet,
     direction: &FlowDirection,
@@ -35,10 +27,10 @@ pub fn handle_tcp_packet(
     flow_map: &'static HashMap<u64, Flow>,
     strategy: &Strategy,
     port_map_dest: u16,
-) -> Result<Option<PacketFlow>, XlbErr> {
+) -> Result<TcpOutcome, XlbErr> {
     let tcp = match packet.proto_hdr() {
         ProtoHeader::Tcp(tcp) => tcp,
-        _ => unsafe { core::hint::unreachable_unchecked() },
+        _ => return Err(XlbErr::ErrInvalidOp),
     };
 
     let (tcp_syn, tcp_fin, tcp_rst) = (tcp.is_syn(), tcp.is_fin(), tcp.is_rst());
@@ -57,12 +49,12 @@ pub fn handle_tcp_packet(
             balancing::select_backend(strategy, backends).ok_or(XlbErr::ErrNoBackends)?;
 
         return match new_flow(packet, &next_backend, port_map_dest, flow_map) {
-            Ok(flow) => Ok(Some(flow)),
-            Err(XlbErr::ErrNoEphemeralPorts) => match packet.rst() {
-                Ok(_) => Ok(None),
-                Err(err) => Err(err),
-            },
-            Err(err) => return Err(err),
+            Ok(flow) => Ok(TcpOutcome::Forward(flow)),
+            Err(XlbErr::ErrNoEphemeralPorts) => {
+                packet.rst()?;
+                Ok(TcpOutcome::Reply)
+            }
+            Err(err) => Err(err),
         };
     }
 
@@ -129,15 +121,15 @@ fn close_flow(
     Ok(())
 }
 
-/// Handles routing of an (expectedly) existing flow as fined
-/// by a packet which matches interest criteria and is
-/// does not have the syn flag set, thus should be part
-/// of an active load balancing connection
+/// Update and route a packet belonging to an existing flow.
+///
+/// A missing client-facing flow is passed to the local stack; a missing
+/// server-facing flow is reported as an expired/orphaned connection.
 fn existing_flow(
     packet: &mut Packet,
     direction: &FlowDirection,
     flow_map: &'static HashMap<u64, Flow>,
-) -> Result<Option<PacketFlow>, XlbErr> {
+) -> Result<TcpOutcome, XlbErr> {
     let flow_key = utils::get_flow_key(packet, direction);
     let key_hash = flow_key.hash_key();
 
@@ -147,7 +139,7 @@ fn existing_flow(
         Some(ptr) => ptr,
         None => {
             if *direction == FlowDirection::ToClient {
-                return Ok(None);
+                return Ok(TcpOutcome::Pass);
             }
             return Err(XlbErr::ErrOrphanedFlow);
         }
@@ -160,7 +152,7 @@ fn existing_flow(
     flow.packets_transfer += 1;
     flow.last_seen_ns = utils::monotonic_time_ns();
 
-    Ok(Some(PacketFlow {
+    Ok(TcpOutcome::Forward(PacketFlow {
         iface: utils::flow_to_iface(flow),
         src_mac: flow.src_mac,
         dst_mac: flow.dst_mac,

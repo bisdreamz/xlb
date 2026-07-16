@@ -28,4 +28,7 @@ pub enum XlbErr {
     ErrMapInsertFailed,
     /// Unable to find available ephemeral port
     ErrNoEphemeralPorts,
+    /// One side of a flow pair exists, but its stored
+    /// counter-flow entry is missing
+    ErrMissingCounterFlow,
 }

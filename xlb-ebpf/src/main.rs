@@ -17,6 +17,7 @@ use aya_ebpf::{bindings::xdp_action, macros::xdp, programs::XdpContext};
 #[cfg(feature = "verbose-logs")]
 use aya_log_ebpf::trace;
 use aya_log_ebpf::warn;
+use xlb_common::XlbErr;
 use xlb_common::config::ebpf::EbpfConfig;
 use xlb_common::consts;
 use xlb_common::types::{Backend, Flow};
@@ -89,6 +90,13 @@ pub fn xlb(ctx: XdpContext) -> u32 {
                     bpf_redirect(iface.idx as u32, 0) as u32
                 }
             },
+            Err(XlbErr::ErrOrphanedFlow) => {
+                // A flow may legitimately disappear after its idle timeout. Logging every
+                // subsequent packet at warn level can overwhelm the userspace log reader.
+                packet_log_debug!(packet, "Packet belongs to an expired flow");
+
+                xdp_action::XDP_DROP
+            }
             Err(xlb_err) => {
                 let err_str: &'static str = xlb_err.into();
                 packet_log_warn!(packet, "Failed to handle packet: {}", err_str);

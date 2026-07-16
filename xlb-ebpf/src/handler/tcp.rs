@@ -4,7 +4,7 @@ use crate::handler::types::PacketFlow;
 use crate::handler::utils;
 use crate::net::packet::Packet;
 use crate::net::types::ProtoHeader;
-use crate::{packet_log_debug, packet_log_trace, packet_log_warn};
+use crate::{packet_log_debug, packet_log_trace};
 use aya_ebpf::helpers::bpf_get_prandom_u32;
 use aya_ebpf::maps::{Array, HashMap};
 use xlb_common::XlbErr;
@@ -96,14 +96,14 @@ fn close_flow(
     }
 
     let Some(counter_flow_ptr) = flow_map.get_ptr_mut(&flow.counter_flow_key_hash) else {
-        packet_log_warn!(
+        packet_log_debug!(
             packet,
             "Flow exists but counter-flow missing during RST or FIN!"
         );
 
-        // should send a RST but flow is already marked as an RST
-        // or is FIN will be cleaned up later as an orphan
-        return Err(XlbErr::ErrOrphanedFlow);
+        // This is distinct from a packet arriving after both flow entries expired: one
+        // surviving half means the map-pair invariant has been violated and must stay visible.
+        return Err(XlbErr::ErrMissingCounterFlow);
     };
 
     let counter_flow = unsafe { &mut *counter_flow_ptr };

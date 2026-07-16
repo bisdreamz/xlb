@@ -107,7 +107,7 @@ provider:
 
 #### Kubernetes Provider
 
-Dynamic backend discovery via Kubernetes Endpoints:
+Dynamic backend discovery using Ready Pods selected by a Kubernetes Service:
 
 ```yaml
 provider:
@@ -116,7 +116,8 @@ provider:
     service: my-service
 ```
 
-XLB watches the Service endpoints and automatically updates backends as pods scale.
+XLB watches Pods matching the Service selector and automatically updates
+backends as their Ready condition and replica count change.
 
 ### Routing Mode
 

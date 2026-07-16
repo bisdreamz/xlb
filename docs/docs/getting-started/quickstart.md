@@ -116,7 +116,7 @@ Docker otherwise sends `SIGKILL` before XLB finishes its shutdown grace period.
 ## Next Steps
 
 - [Kubernetes Deployment](../deployment/kubernetes.md) - Deploy with Helm for production
-- [Configuration Overview](../configuration/overview.md) - All config options
+- [Configuration Overview](../configuration/index.md) - All config options
 - [Configuration Reference](../configuration/reference.md) - Full schema
 
 ## Troubleshooting

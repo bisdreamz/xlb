@@ -1,4 +1,5 @@
 site_name: XLB Documentation
+site_url: https://docs.runxlb.com
 site_description: eBPF-powered Layer 4 Load Balancer
 site_author: Neuronic
 
@@ -20,6 +21,7 @@ theme:
   features:
     - navigation.tabs
     - navigation.sections
+    - navigation.indexes
     - navigation.top
     - search.suggest
     - search.highlight
@@ -31,11 +33,12 @@ nav:
     - Installation: getting-started/installation.md
     - Quick Start: getting-started/quickstart.md
   - Configuration:
-    - Overview: configuration/overview.md
+    - Overview: configuration/index.md
     - Reference: configuration/reference.md
   - Deployment:
     - Kubernetes: deployment/kubernetes.md
     - Helm Chart: deployment/helm.md
+  - runxlb.com: https://runxlb.com
 
 markdown_extensions:
   - admonition

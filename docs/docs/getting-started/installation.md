@@ -42,7 +42,7 @@ provider:
         ip: 10.0.1.10
 ```
 
-See [Configuration Overview](../configuration/overview.md) for all options.
+See [Configuration Overview](../configuration/index.md) for all options.
 
 ## Next Steps
 

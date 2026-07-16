@@ -45,12 +45,38 @@ fn generate_docs() -> Result<()> {
             println!("✓ Generated docs/docs/configuration/reference.md");
         }
         Ok(result) => {
-            eprintln!("Warning: generate-schema-doc failed: {}",
-                String::from_utf8_lossy(&result.stderr));
+            eprintln!(
+                "Warning: generate-schema-doc failed: {}",
+                String::from_utf8_lossy(&result.stderr)
+            );
             print_install_instructions();
         }
         Err(_) => {
             print_install_instructions();
+        }
+    }
+
+    // Build mkdocs site
+    println!("Building mkdocs site...");
+    let mkdocs_output = Command::new("mkdocs")
+        .arg("build")
+        .arg("-f")
+        .arg("docs/mkdocs.yml")
+        .output();
+
+    match mkdocs_output {
+        Ok(result) if result.status.success() => {
+            println!("✓ Built mkdocs site");
+        }
+        Ok(result) => {
+            eprintln!(
+                "Warning: mkdocs build failed: {}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            println!("Install mkdocs: pip install mkdocs mkdocs-material");
+        }
+        Err(_) => {
+            println!("mkdocs not found. Install: pip install mkdocs mkdocs-material");
         }
     }
 

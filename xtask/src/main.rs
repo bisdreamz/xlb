@@ -4,6 +4,7 @@ use std::fs;
 use std::process::Command;
 
 #[allow(dead_code)]
+#[rustfmt::skip]
 #[path = "../../xlb/src/config.rs"]
 mod xlb_config;
 

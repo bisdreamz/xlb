@@ -855,9 +855,9 @@ merge. Do not mix opportunistic cleanup into a TCP correctness branch.
 | --- | --- | --- | --- |
 | 1 | `docker-update-07-2026` | Container/runtime modernization only | Implemented and independently reviewed |
 | 2 | `dependency-refresh-07-2026` | Lockfile refresh only | Implemented and independently reviewed |
-| 3 | `docs-update-07-2026` | Accurate public docs, strict generation, and this durable plan | Implemented; review findings in progress |
-| 4 | `kube-watcher-hygiene` | `deletionTimestamp`, watcher snapshot reconciliation, current Pod RBAC | Implemented and independently reviewed |
-| 5 | `orphan-timeout-guard` | 300-second config/schema floor and expired-flow log-storm guard | Implemented and independently reviewed |
+| 3 | `kube-watcher-hygiene` | `deletionTimestamp`, watcher snapshot reconciliation, current Pod RBAC | Implemented and independently reviewed |
+| 4 | `orphan-timeout-guard` | 300-second config/schema floor and expired-flow log-storm guard | Implemented and independently reviewed |
+| 5 | `docs-update-07-2026` | Accurate public docs, strict generation, and this durable plan | Implemented and independently reviewed |
 | 6 | `tcp-test-foundations` | Host-side packet/state tests and reusable privileged netns/veth harness | Planned |
 | 7 | `tcp-flow-key-v4` | Exact map key and tuple identity only | Planned |
 | 8 | `shutdown-rst-correctness` | XLB process-shutdown behavior only; never answer RST with RST | Planned |

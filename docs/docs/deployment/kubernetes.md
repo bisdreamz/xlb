@@ -41,8 +41,9 @@ config:
       service: backend-service
 ```
 
-New flows are assigned only to matching Pods that are Ready and not terminating. Established flows
-remain pinned to their selected backend while it drains.
+After the required `kube-watcher-hygiene` update, new flows are assigned only to matching Pods that
+are Ready and not terminating. Established flows remain pinned to their selected backend while it
+drains. Deploy that code update together with this documentation.
 
 ### Port Mapping
 
@@ -95,8 +96,9 @@ terminationGracePeriodSeconds: 90
 
 **Shutdown flow:**
 1. Kubernetes runs the `preStop` hook, which creates `/tmp/shutdown`.
-2. The readiness probe fails and Kubernetes removes the XLB Pod from eligible Service endpoints.
-3. Kubernetes sends SIGTERM after the hook completes.
+2. Kubernetes sends SIGTERM as soon as the hook exits.
+3. A subsequent readiness probe observes `/tmp/shutdown`; endpoint removal then propagates
+   asynchronously and is not guaranteed to complete before SIGTERM handling begins.
 4. XLB sets its eBPF shutdown flag and remains attached for `shutdown_timeout`.
 5. Traffic that actually reaches the XLB during that window receives a reset response.
 6. XLB exits and detaches the program after the timeout.

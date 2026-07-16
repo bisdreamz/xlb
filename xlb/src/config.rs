@@ -148,6 +148,35 @@ fn validate_orphan_ttl_secs(orphan_ttl_secs: u32) -> Result<()> {
 mod tests {
     use super::*;
     use schemars::schema_for;
+    use std::fs;
+
+    const MINIMAL_CONFIG: &str = r#"
+name: config-test
+listen: auto
+proto: tcp
+ports:
+  - local_port: 80
+    remote_port: 8080
+provider:
+  static:
+    backends:
+      - name: backend-1
+        ip: 127.0.0.1
+mode: nat
+shutdown_timeout: 15
+"#;
+
+    fn load_test_config(name: &str, yaml: &str) -> Result<XlbConfig> {
+        let path = std::env::temp_dir().join(format!(
+            "xlb-{name}-{}-{}.yaml",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        fs::write(&path, yaml).expect("write test config");
+        let result = XlbConfig::load(path.clone());
+        fs::remove_file(path).expect("remove test config");
+        result
+    }
 
     #[test]
     fn schema_advertises_orphan_ttl_minimum() {
@@ -187,5 +216,25 @@ mod tests {
     fn accepts_five_minute_orphan_ttl() {
         validate_orphan_ttl_secs(MIN_ORPHAN_TTL_SECS)
             .expect("five-minute orphan TTL must be accepted");
+    }
+
+    #[test]
+    fn load_rejects_orphan_ttl_below_five_minutes() {
+        let yaml = format!("{MINIMAL_CONFIG}\norphan_ttl_secs: 299\n");
+        let error = load_test_config("short-orphan-ttl", &yaml)
+            .expect_err("short orphan TTL must fail config loading");
+
+        assert_eq!(
+            error.to_string(),
+            "orphan_ttl_secs must be at least 300 seconds (5 minutes)"
+        );
+    }
+
+    #[test]
+    fn load_defaults_orphan_ttl_to_five_minutes() {
+        let config = load_test_config("default-orphan-ttl", MINIMAL_CONFIG)
+            .expect("config without orphan TTL must load");
+
+        assert_eq!(config.orphan_ttl_secs, MIN_ORPHAN_TTL_SECS);
     }
 }

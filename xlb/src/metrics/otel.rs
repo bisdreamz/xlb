@@ -100,3 +100,13 @@ pub fn log_metrics(stats: &LbFlowStats, backends: &Vec<Host>) {
     ingress::log_ingress(stats);
     egress::log_egress(stats);
 }
+
+/// Record violations of the two-entry flow-map invariant.
+pub fn record_flow_pair_invariant_violations(count: u64) {
+    global::record_flow_pair_invariant_violations(count);
+}
+
+/// Record orphan cleanup once per connection rather than per directional entry.
+pub fn record_connections_orphaned(count: u64) {
+    global::record_connections_orphaned(count);
+}

@@ -65,5 +65,6 @@ path = "src/lib.rs"
 [[bin]]
 name = "xlb"
 path = "src/main.rs"
-test = false
+# The nested verbose eBPF debug build currently exceeds BPF's stack limit.
+# Run binary unit tests with: cargo test --release -p xlb --bin xlb
 bench = false

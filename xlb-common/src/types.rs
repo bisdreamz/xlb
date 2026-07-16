@@ -147,10 +147,14 @@ pub struct Flow {
     /// If true and rst_ns > 0, this side of the flow
     /// was the cause of unhappy closure
     pub rst_is_src: bool,
-    /// Explicit tail bytes keep this shared map value free of implicit,
+    /// The eBPF path observed a missing counterpart while closing this flow.
+    pub pair_invalid: bool,
+    /// Explicit bytes keep the following pair tag aligned without implicit,
     /// potentially uninitialized padding.
     #[doc(hidden)]
-    pub _reserved: [u8; 7],
+    pub _reserved: [u8; 2],
+    /// Generation shared by both directional entries of this flow pair.
+    pub pair_tag: u32,
 }
 
 #[cfg(feature = "user")]
@@ -239,7 +243,9 @@ mod tests {
         assert_eq!(core::mem::offset_of!(Flow, fin), 150);
         assert_eq!(core::mem::offset_of!(Flow, fin_is_src), 151);
         assert_eq!(core::mem::offset_of!(Flow, rst_is_src), 152);
-        assert_eq!(core::mem::offset_of!(Flow, _reserved), 153);
+        assert_eq!(core::mem::offset_of!(Flow, pair_invalid), 153);
+        assert_eq!(core::mem::offset_of!(Flow, _reserved), 154);
+        assert_eq!(core::mem::offset_of!(Flow, pair_tag), 156);
     }
 
     #[test]

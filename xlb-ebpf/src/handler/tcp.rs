@@ -11,6 +11,12 @@ use xlb_common::XlbErr;
 use xlb_common::config::ebpf::Strategy;
 use xlb_common::types::{Backend, Flow, FlowDirection, FlowKeyV4};
 
+#[derive(Clone, Copy)]
+enum CloseKind {
+    Fin,
+    Reset,
+}
+
 /// Process TCP flow state, backend selection, and packet disposition.
 ///
 /// # Arguments
@@ -39,7 +45,7 @@ pub fn handle_tcp_packet(
     // malformed SYN|RST must not create a flow, and FIN|RST is an immediate
     // reset rather than an orderly close.
     if tcp_rst {
-        close_flow(packet, direction, false, true, flow_map)?;
+        close_flow(packet, direction, CloseKind::Reset, flow_map)?;
         return existing_flow(packet, direction, flow_map);
     }
 
@@ -60,7 +66,7 @@ pub fn handle_tcp_packet(
 
     if tcp_fin {
         // record flow state but continue to process
-        close_flow(packet, direction, true, false, flow_map)?;
+        close_flow(packet, direction, CloseKind::Fin, flow_map)?;
     }
 
     existing_flow(packet, direction, flow_map)
@@ -69,8 +75,7 @@ pub fn handle_tcp_packet(
 fn close_flow(
     packet: &Packet,
     direction: &FlowDirection,
-    fin: bool,
-    rst: bool,
+    kind: CloseKind,
     flow_map: &'static HashMap<FlowKeyV4, Flow>,
 ) -> Result<(), XlbErr> {
     let flow_key = utils::get_flow_key(packet, direction);
@@ -86,13 +91,16 @@ fn close_flow(
     let flow = unsafe { &mut *flow_ptr };
     let now_ns = utils::monotonic_time_ns();
 
-    if fin {
-        packet_log_debug!(packet, "TCP fin initiated");
-        flow.fin = true;
-    } else if rst {
-        packet_log_debug!(packet, "TCP rst initiated");
-        flow.rst_ns = now_ns;
-        flow.rst_is_src = true;
+    match kind {
+        CloseKind::Fin => {
+            packet_log_debug!(packet, "TCP fin initiated");
+            flow.fin = true;
+        }
+        CloseKind::Reset => {
+            packet_log_debug!(packet, "TCP rst initiated");
+            flow.rst_ns = now_ns;
+            flow.rst_is_src = true;
+        }
     }
 
     let Some(counter_flow_ptr) = flow_map.get_ptr_mut(&flow.counter_flow_key) else {
@@ -101,20 +109,32 @@ fn close_flow(
             "Flow exists but counter-flow missing during RST or FIN!"
         );
 
-        // This is distinct from a packet arriving after both flow entries expired: one
-        // surviving half means the map-pair invariant has been violated and must stay visible.
-        return Err(XlbErr::ErrMissingCounterFlow);
+        flow.pair_invalid = true;
+
+        // The surviving rewrite recipe is still valid for this packet. Forward
+        // it rather than turning a map-pair invariant violation into a drop;
+        // userspace cleanup will remove the survivor and record the violation.
+        return Ok(());
     };
 
     let counter_flow = unsafe { &mut *counter_flow_ptr };
+    if counter_flow.pair_tag != flow.pair_tag {
+        packet_log_debug!(packet, "Flow counterpart generation mismatch during close!");
+        flow.pair_invalid = true;
+        return Ok(());
+    }
 
-    if fin && counter_flow.fin {
-        flow.fin_both_ns = now_ns;
-        counter_flow.fin_both_ns = now_ns;
-        counter_flow.fin_is_src = true;
-    } else if rst {
-        counter_flow.rst_ns = now_ns;
-        counter_flow.rst_is_src = false;
+    match kind {
+        CloseKind::Fin if counter_flow.fin => {
+            flow.fin_both_ns = now_ns;
+            counter_flow.fin_both_ns = now_ns;
+            counter_flow.fin_is_src = true;
+        }
+        CloseKind::Reset => {
+            counter_flow.rst_ns = now_ns;
+            counter_flow.rst_is_src = false;
+        }
+        CloseKind::Fin => {}
     }
 
     Ok(())
@@ -170,9 +190,10 @@ fn find_ephemeral_port(
     backend: &Backend,
     backend_port: u16,
     flow_map: &'static HashMap<FlowKeyV4, Flow>,
-) -> Result<FlowKeyV4, XlbErr> {
+) -> Result<(FlowKeyV4, u32), XlbErr> {
     for _ in 0..5 {
-        let ephemeral_port = (unsafe { bpf_get_prandom_u32() } % 50000) as u16 + 5000;
+        let pair_tag = unsafe { bpf_get_prandom_u32() };
+        let ephemeral_port = (pair_tag % 50000) as u16 + 5000;
         let client_flow_key = utils::client_flow_key(
             backend.ip as u32,
             backend.src_iface_ip as u32,
@@ -181,7 +202,7 @@ fn find_ephemeral_port(
         );
 
         if unsafe { flow_map.get(&client_flow_key).is_none() } {
-            return Ok(client_flow_key);
+            return Ok((client_flow_key, pair_tag));
         }
     }
 
@@ -207,9 +228,10 @@ fn new_flow(
     let packet_flow;
     let server_key;
     let client_key;
+    let pair_tag;
 
     {
-        client_key = find_ephemeral_port(backend, dest_map_port, flow_map)?;
+        (client_key, pair_tag) = find_ephemeral_port(backend, dest_map_port, flow_map)?;
 
         let server_flow = new_flow_to_server(
             packet,
@@ -218,6 +240,7 @@ fn new_flow(
             &egress_iface,
             &client_key,
             now_ns,
+            pair_tag,
         );
         server_key = utils::server_flow_key(
             packet.src_ip() as u32,
@@ -244,7 +267,14 @@ fn new_flow(
             .map_err(|_| XlbErr::ErrMapInsertFailed)?;
     }
 
-    let client_flow = new_flow_to_client(packet, backend, server_key, packet.dst_ip(), now_ns)?;
+    let client_flow = new_flow_to_client(
+        packet,
+        backend,
+        server_key,
+        packet.dst_ip(),
+        now_ns,
+        pair_tag,
+    )?;
 
     flow_map
         .insert(&client_key, &client_flow, 0)
@@ -260,6 +290,7 @@ fn new_flow_to_server(
     egress_iface: &Iface,
     client_flow_key: &FlowKeyV4,
     now_ns: u64,
+    pair_tag: u32,
 ) -> Flow {
     let to_server = Flow {
         direction: FlowDirection::ToServer,
@@ -281,8 +312,10 @@ fn new_flow_to_server(
         fin_both_ns: 0,
         rst_ns: 0,
         rst_is_src: false,
+        pair_invalid: false,
+        pair_tag,
         counter_flow_key: *client_flow_key,
-        _reserved: [0; 7],
+        _reserved: [0; 2],
     };
 
     to_server
@@ -294,6 +327,7 @@ fn new_flow_to_client(
     counter_flow_key: FlowKeyV4,
     ext_src_ip: u128,
     now_ns: u64,
+    pair_tag: u32,
 ) -> Result<Flow, XlbErr> {
     Ok(Flow {
         direction: FlowDirection::ToClient,
@@ -317,7 +351,9 @@ fn new_flow_to_client(
         fin_is_src: false,
         rst_ns: 0,
         rst_is_src: false,
+        pair_invalid: false,
+        pair_tag,
         counter_flow_key,
-        _reserved: [0; 7],
+        _reserved: [0; 2],
     })
 }

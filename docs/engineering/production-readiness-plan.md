@@ -415,9 +415,10 @@ Demote expected `ErrOrphanedFlow` packet logging to release-compiled-out debug o
 trace output, and expose aggregate orphan/missing-flow counters instead. Reserve
 warning/error logs for unexpected invariant failures and rate-limit or sample
 any warning that can be triggered by network traffic. A surviving flow whose
-stored counterpart is absent is not an expected expired-flow event: represent
-it with a distinct error such as `ErrMissingCounterFlow` and keep that invariant
-visible in release telemetry.
+stored counterpart is absent is not an expected expired-flow event: mark the
+surviving entry as pair-invalid, forward its still-valid rewrite recipe, and
+keep the invariant visible in aggregated release telemetry until userspace
+removes it.
 
 The operating system's TCP keepalive configuration cannot be inferred from the
 initial TCP window, and ordinary keepalive settings are not negotiated in packet
@@ -857,14 +858,14 @@ next branch. Do not mix opportunistic cleanup into a TCP correctness branch.
 | 1 | `docker-update-07-2026` | Container/runtime modernization only | Implemented and independently reviewed |
 | 2 | `dependency-refresh-07-2026` | Lockfile refresh only | Implemented and independently reviewed |
 | 3 | `kube-watcher-hygiene` | `deletionTimestamp`, watcher snapshot reconciliation, current Pod RBAC | Implemented and independently reviewed |
-| 4 | `orphan-timeout-clamp` | Warning-and-clamp 300-second floor and expired-flow log-storm guard | Implemented; review pending |
+| 4 | `orphan-timeout-clamp` | Warning-and-clamp 300-second floor and expired-flow log-storm guard | Implemented and independently reviewed |
 | 5 | `docs-update-07-2026` | Accurate public docs, strict generation, and this durable plan | Implemented and independently reviewed |
-| 6 | `tcp-test-foundations` | Host-side packet/state tests and reusable privileged netns/veth harness | Planned |
-| 7 | `tcp-flow-key-v4` | Exact map key and tuple identity only | Planned |
-| 8 | `shutdown-rst-correctness` | XLB process-shutdown behavior only; never answer RST with RST | Planned |
-| 9 | `tcp-rst-packet-construction` | Shared TTL/IHL/checksum/sequence and pointer-order safety | Planned |
-| 10 | `ephemeral-rst-outcome` | Explicit TCP outcome and port-exhaustion `XDP_TX` fix | Planned |
-| 11 | `tcp-pair-cleanup` | Pair-wide expiry/closure and invariant accounting | Planned |
+| 6 | `tcp-test-foundations` | Host-side packet/state tests and reusable privileged netns/veth harness | Deferred; focused host-side unit tests are added with each branch |
+| 7 | `tcp-flow-key-v4` | Exact map key and tuple identity only | Implemented and independently reviewed |
+| 8 | `shutdown-rst-correctness` | XLB process-shutdown behavior only; never answer RST with RST | Implemented and independently reviewed |
+| 9 | `tcp-rst-packet-construction` | Shared TTL/IHL/checksum/sequence and pointer-order safety | Implemented and independently reviewed |
+| 10 | `ephemeral-rst-outcome` | Explicit TCP outcome and port-exhaustion `XDP_TX` fix | Implemented and independently reviewed |
+| 11 | `tcp-pair-cleanup` | Pair-wide expiry/closure and invariant accounting | Implemented and independently reviewed |
 | 12 | `tcp-syn-idempotency` | SYN-only guard, retransmission reuse, terminal eviction, transactional inserts | Planned; merge immediately after pair cleanup review |
 | 13 | `unsupported-config-packets` | Reject UDP/DSR/IPv6 config; safe IPv4 option/fragment policy | Planned |
 | 14 | `endpoint-slice-discovery` | Shared nullable-condition model and both consumers | Planned |

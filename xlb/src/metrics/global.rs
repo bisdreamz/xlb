@@ -10,6 +10,7 @@ struct GlobalMetrics {
     connections_opened: Counter<u64>,
     connections_closed: Counter<u64>,
     connections_orphaned: Counter<u64>,
+    flow_pair_invariant_violations: Counter<u64>,
 }
 
 static METRICS: OnceLock<GlobalMetrics> = OnceLock::new();
@@ -41,6 +42,11 @@ pub fn init(meter: &Meter) -> Result<()> {
             .u64_counter("xlb.global.connections.orphaned")
             .with_description("Orphaned connections cleaned up")
             .build(),
+
+        flow_pair_invariant_violations: meter
+            .u64_counter("xlb.global.flow_pair.invariant_violations")
+            .with_description("Missing, mismatched, or concurrently removed flow-pair entries")
+            .build(),
     };
 
     METRICS
@@ -48,6 +54,22 @@ pub fn init(meter: &Meter) -> Result<()> {
         .map_err(|_| anyhow::anyhow!("Global metrics already initialized"))?;
 
     Ok(())
+}
+
+pub fn record_flow_pair_invariant_violations(count: u64) {
+    let Some(metrics) = METRICS.get() else {
+        return;
+    };
+
+    metrics.flow_pair_invariant_violations.add(count, &[]);
+}
+
+pub fn record_connections_orphaned(count: u64) {
+    let Some(metrics) = METRICS.get() else {
+        return;
+    };
+
+    metrics.connections_orphaned.add(count, &[]);
 }
 
 /// Record global metrics (no backend-specific labels)
@@ -68,8 +90,4 @@ pub fn log_global(stats: &LbFlowStats, backends: &Vec<Host>) {
     let total_closed =
         stats.totals.to_server.closed_total_conns + stats.totals.to_client.closed_total_conns;
     m.connections_closed.add(total_closed as u64, &[]);
-
-    let total_orphaned =
-        stats.totals.to_server.orphaned_conns + stats.totals.to_client.orphaned_conns;
-    m.connections_orphaned.add(total_orphaned as u64, &[]);
 }

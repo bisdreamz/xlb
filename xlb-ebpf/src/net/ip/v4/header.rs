@@ -2,8 +2,8 @@ use network_types::ip::Ipv4Hdr;
 
 /// Wrapper around IPv4 header for safe manipulation and checksum management.
 ///
-/// All address-modifying methods automatically update the IP header checksum
-/// using efficient incremental checksum calculation via BPF helpers.
+/// Address-modifying methods recalculate the fixed IPv4 header checksum after
+/// mutation.
 pub struct Ipv4Header<'a> {
     hdr: &'a mut Ipv4Hdr,
 }
@@ -35,19 +35,24 @@ impl<'a> Ipv4Header<'a> {
         self.hdr.tot_len()
     }
 
-    /// Update total length and adjust checksum incrementally.
-    pub fn set_total_len(&mut self, new_len: u16) {
-        if self.total_len() == new_len {
-            return;
-        }
-
-        self.update_chksum_for_total_len(new_len);
-        self.hdr.set_tot_len(new_len);
-    }
-
     /// Header length (ihl) in bytes
     pub fn header_len_ihl(&self) -> u8 {
         self.hdr.ihl()
+    }
+
+    /// Whether this header shape can safely be reflected as a TCP reset.
+    ///
+    /// Transport parsing currently assumes a fixed 20-byte IPv4 header, and
+    /// XLB does not reassemble fragments in XDP.
+    pub fn supports_rst_response(&self) -> bool {
+        let fragment_flags = self.hdr.frag_flags();
+        let unsupported_flags = fragment_flags & !0x2 != 0;
+        let nonzero_fragment_offset = self.hdr.frag_offset() != 0;
+
+        self.hdr.version() == 4
+            && self.header_len_ihl() as usize == Ipv4Hdr::LEN
+            && !unsupported_flags
+            && !nonzero_fragment_offset
     }
 
     /// Set both source and destination addresses.
@@ -59,12 +64,32 @@ impl<'a> Ipv4Header<'a> {
         self.recalculate_checksum();
     }
 
+    /// Rewrite all IPv4 fields needed for a locally generated response and
+    /// calculate the checksum once after the complete mutation.
+    pub fn write_response_header(
+        &mut self,
+        new_src: u32,
+        new_dst: u32,
+        new_total_len: u16,
+        ttl: u8,
+    ) {
+        self.hdr.src_addr = new_src.to_be_bytes();
+        self.hdr.dst_addr = new_dst.to_be_bytes();
+        self.hdr.set_tot_len(new_total_len);
+        self.hdr.ttl = ttl;
+        self.recalculate_checksum();
+    }
+
     /// Fully recalculate IP header checksum from scratch.
     /// Use this when the original checksum might be invalid (e.g., from NIC offload).
     fn recalculate_checksum(&mut self) {
         self.hdr.check = [0, 0]; // Zero out checksum field
 
         // Manual checksum calculation - unrolled for verifier
+        // SAFETY: Ipv4Header is constructed only after the complete 20-byte
+        // base header has passed the XDP bounds check. RST generation rejects
+        // options before this fixed-header checksum path; general IPv4-option
+        // policy is handled separately.
         let hdr = unsafe { &*(self.hdr as *const Ipv4Hdr as *const [u8; 20]) };
 
         let mut sum: u32 = 0;
@@ -89,11 +114,76 @@ impl<'a> Ipv4Header<'a> {
         let checksum = (!sum) as u16;
         self.hdr.check = checksum.to_be_bytes();
     }
+}
 
-    fn update_chksum_for_total_len(&mut self, new_len: u16) {
-        // Update total length field
-        self.hdr.tot_len = new_len.to_be_bytes();
-        // Recalculate entire checksum (simpler and more reliable than incremental)
-        self.recalculate_checksum();
+#[cfg(test)]
+mod tests {
+    use super::Ipv4Header;
+    use network_types::ip::{IpProto, Ipv4Hdr};
+
+    fn ipv4_header(vihl: u8, fragments: u16) -> Ipv4Hdr {
+        Ipv4Hdr {
+            vihl,
+            tos: 0,
+            tot_len: 60u16.to_be_bytes(),
+            id: 123u16.to_be_bytes(),
+            frags: fragments.to_be_bytes(),
+            ttl: 1,
+            proto: IpProto::Tcp,
+            check: [0xff, 0xff],
+            src_addr: [192, 0, 2, 1],
+            dst_addr: [198, 51, 100, 2],
+        }
+    }
+
+    fn checksum_is_valid(header: &Ipv4Hdr) -> bool {
+        // SAFETY: Ipv4Hdr has a stable C layout and the slice covers exactly
+        // the live header value for the duration of this calculation.
+        let bytes = unsafe {
+            core::slice::from_raw_parts(header as *const Ipv4Hdr as *const u8, Ipv4Hdr::LEN)
+        };
+        let mut sum = 0u32;
+
+        for word in bytes.chunks_exact(2) {
+            sum += u16::from_be_bytes([word[0], word[1]]) as u32;
+        }
+        while sum >> 16 != 0 {
+            sum = (sum & 0xffff) + (sum >> 16);
+        }
+
+        sum == 0xffff
+    }
+
+    #[test]
+    fn rst_response_requires_fixed_unfragmented_ipv4_header() {
+        let cases = [
+            (0x45, 0x0000, true),
+            (0x45, 0x4000, true),
+            (0x46, 0x0000, false),
+            (0x44, 0x0000, false),
+            (0x55, 0x0000, false),
+            (0x45, 0x8000, false),
+            (0x45, 0x2000, false),
+            (0x45, 0x0001, false),
+        ];
+
+        for (vihl, fragments, expected) in cases {
+            let mut raw = ipv4_header(vihl, fragments);
+            let header = Ipv4Header::new(&mut raw);
+            assert_eq!(header.supports_rst_response(), expected);
+        }
+    }
+
+    #[test]
+    fn response_rewrite_sets_fields_and_valid_checksum() {
+        let mut raw = ipv4_header(0x45, 0x4000);
+
+        Ipv4Header::new(&mut raw).write_response_header(0xc633_6402, 0xc000_0201, 40, 64);
+
+        assert_eq!(raw.src_addr, [198, 51, 100, 2]);
+        assert_eq!(raw.dst_addr, [192, 0, 2, 1]);
+        assert_eq!(raw.tot_len, 40u16.to_be_bytes());
+        assert_eq!(raw.ttl, 64);
+        assert!(checksum_is_valid(&raw));
     }
 }

@@ -2,14 +2,17 @@ use aya_ebpf::{helpers::bpf_xdp_adjust_tail, programs::XdpContext};
 use network_types::tcp::TcpHdr;
 use xlb_common::XlbErr;
 
-/// Shrink packet payload so only TCP header remains before emitting RST.
+/// Shrink packet payload so only the TCP header remains before emitting a reset.
+///
+/// A successful `bpf_xdp_adjust_tail` invalidates every pointer into the packet.
+/// The caller must return immediately without accessing cached packet headers.
 #[inline(always)]
 pub fn truncate_payload_for_rst(
     ctx: &XdpContext,
     current_total_len: u16,
     ip_hdr_len_bytes: u8,
     tcp_hdr_len_bytes: u32,
-) -> Result<u16, XlbErr> {
+) -> Result<(), XlbErr> {
     let desired_total_len = (ip_hdr_len_bytes as u32).saturating_add(tcp_hdr_len_bytes);
 
     if desired_total_len > current_total_len as u32 {
@@ -18,13 +21,15 @@ pub fn truncate_payload_for_rst(
 
     let delta = desired_total_len as i32 - current_total_len as i32;
     if delta != 0 {
+        // SAFETY: ctx is the active XDP context and delta only shrinks the
+        // validated IPv4 packet to its already-constructed header length.
         let ret = unsafe { bpf_xdp_adjust_tail(ctx.ctx, delta) };
         if ret < 0 {
             return Err(XlbErr::ErrInvalidOp);
         }
     }
 
-    Ok(desired_total_len as u16)
+    Ok(())
 }
 
 /// Get TCP header length in bytes from data offset field.
@@ -35,9 +40,9 @@ pub(super) fn get_header_len(tcp_hdr: &TcpHdr) -> u32 {
     tcp_hdr.doff() as u32 * 4
 }
 
-/// Calculate TCP segment length for RFC 793 sequence number calculations.
+/// Calculate TCP segment length for RFC 9293 sequence number calculations.
 ///
-/// Per RFC 793 Section 3.3, segment length is the number of octets occupied
+/// TCP segment length is the number of octets occupied
 /// by the data in the segment, counting SYN and FIN flags as one octet each.
 ///
 /// # Formula

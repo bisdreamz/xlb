@@ -4,8 +4,11 @@ use crate::net::types::{IpHeader, ProtoHeader};
 use crate::{net, utils};
 use aya_ebpf::programs::XdpContext;
 use aya_log_ebpf::info;
+use network_types::eth::EthHdr;
 use xlb_common::XlbErr;
 use xlb_common::net::{IpVersion, Proto};
+
+const GENERATED_RST_TTL: u8 = 64;
 
 /// Macros for packet logging with compile-time optimization
 /// debug/trace logs are compiled out when 'verbose-logs' feature is disabled (zero overhead)
@@ -275,45 +278,63 @@ impl<'a> Packet<'a> {
         Ok(())
     }
 
-    /// Transform packet into a RST response by swapping
-    /// the src/dst values. Errors if this is not a TCP packet.
+    /// Transform a packet into a TCP reset response.
+    ///
+    /// All packet-shape validation happens before mutation. A later tail-adjust
+    /// failure can leave the packet rewritten, so callers must drop the packet
+    /// whenever this method returns an error.
     #[inline(always)]
     pub fn rst(&mut self) -> Result<(), XlbErr> {
-        let src_mac = self.eth_hdr.src_mac();
-        let dst_mac = self.eth_hdr.dst_mac();
-
-        self.eth_hdr.set_src_mac(&dst_mac);
-        self.eth_hdr.set_dst_mac(&src_mac);
+        let frame_len = self.size();
 
         match &mut self.ip_hdr {
             IpHeader::Ipv4(ip) => {
+                // Transport parsing currently assumes a fixed IPv4 header and
+                // cannot safely construct a response from fragments.
+                if !ip.supports_rst_response() {
+                    return Err(XlbErr::ErrInvalidOp);
+                }
+
                 let src_ip = ip.src_addr();
                 let dst_ip = ip.dst_addr();
                 let original_total_len = ip.total_len();
                 let ip_hdr_len_bytes = ip.header_len_ihl();
 
-                ip.set_src_dst_addrs(dst_ip, src_ip);
+                if original_total_len as u64 > frame_len.saturating_sub(EthHdr::LEN as u64) {
+                    return Err(XlbErr::ErrInvalidOp);
+                }
 
                 match &mut self.proto_hdr {
                     ProtoHeader::Tcp(tcp) => {
-                        let new_total_len =
-                            tcp.rst(dst_ip, src_ip, original_total_len, ip_hdr_len_bytes)?;
-                        ip.set_total_len(new_total_len);
-
+                        let new_total_len = tcp.write_rst_response(
+                            dst_ip,
+                            src_ip,
+                            original_total_len,
+                            ip_hdr_len_bytes,
+                        )?;
                         let tcp_len_bytes = tcp.header_len_bytes();
+
+                        ip.write_response_header(dst_ip, src_ip, new_total_len, GENERATED_RST_TTL);
+
+                        let src_mac = self.eth_hdr.src_mac();
+                        let dst_mac = self.eth_hdr.dst_mac();
+                        self.eth_hdr.set_src_mac(&dst_mac);
+                        self.eth_hdr.set_dst_mac(&src_mac);
+
+                        // bpf_xdp_adjust_tail invalidates every packet pointer.
+                        // Keep this as the tail expression so no cached header
+                        // is accessed after it.
                         truncate_payload_for_rst(
                             self.ctx,
                             original_total_len,
                             ip_hdr_len_bytes,
                             tcp_len_bytes,
-                        )?;
+                        )
                     }
-                    ProtoHeader::Udp(_) => return Err(XlbErr::ErrInvalidOp),
+                    ProtoHeader::Udp(_) => Err(XlbErr::ErrInvalidOp),
                 }
             }
-            IpHeader::Ipv6(_) => return Err(XlbErr::ErrNotYetImpl),
+            IpHeader::Ipv6(_) => Err(XlbErr::ErrNotYetImpl),
         }
-
-        Ok(())
     }
 }

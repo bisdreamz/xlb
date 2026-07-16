@@ -1,6 +1,6 @@
 # XLB - eBPF Layer 4 Load Balancer
 
-High-performance Layer 4 (TCP/UDP) load balancer powered by eBPF XDP. Handles >100k RPS with 2-4 CPU cores.
+XDP-native IPv4/TCP Layer 4 load balancer. UDP and IPv6 balancing are not yet implemented.
 
 ## Project Structure
 
@@ -11,28 +11,29 @@ High-performance Layer 4 (TCP/UDP) load balancer powered by eBPF XDP. Handles >1
 ## Dependencies
 
 ```bash
-# Rust toolchains
-rustup install stable nightly
-rustup component add rust-src --toolchain nightly
+# The eBPF build uses build-std and therefore requires a pinned nightly.
+rustup toolchain install nightly-2026-07-09 --profile minimal --component rust-src
 
-# eBPF build tools
-sudo apt-get install llvm clang libbpf-dev linux-headers-$(uname -r)
+# Install the linker on Arch Linux or any other supported Linux distribution.
+cargo install cargo-binstall --locked
+cargo binstall bpf-linker@0.10.4
 
 # Documentation (optional)
-pipx install mkdocs-material json-schema-for-humans
+pipx install mkdocs-material
+pipx install json-schema-for-humans
 ```
 
 ## Build
 
 ```bash
-cargo build --release
+XLB_EBPF_TOOLCHAIN=nightly-2026-07-09 cargo build --locked --release
 ```
 
 ## Documentation
 
 ```bash
 # Generate docs from config structs
-cargo xtask gendocs
+cargo run --package xtask -- gendocs
 
 # Serve locally
 cd docs && mkdocs serve

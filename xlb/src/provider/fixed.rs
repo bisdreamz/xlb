@@ -1,4 +1,5 @@
-use crate::provider::{BackendProvider, Host};
+use crate::config::Host;
+use crate::provider::BackendProvider;
 use anyhow::{Result, bail};
 use async_trait::async_trait;
 

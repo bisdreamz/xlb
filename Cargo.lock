@@ -3027,9 +3027,11 @@ name = "xtask"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "config",
  "schemars 0.8.22",
+ "serde",
  "serde_json",
- "xlb",
+ "xlb-common",
 ]
 
 [[package]]

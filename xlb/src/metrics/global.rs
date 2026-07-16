@@ -1,5 +1,5 @@
+use crate::config::Host;
 use crate::r#loop::utils::LbFlowStats;
-use crate::provider::Host;
 use anyhow::Result;
 use opentelemetry::metrics::{Counter, Gauge, Meter};
 use std::sync::OnceLock;

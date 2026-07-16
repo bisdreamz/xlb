@@ -1,18 +1,10 @@
-use crate::system;
+use crate::{config::Host, system};
 use anyhow::Result;
 use async_trait::async_trait;
 use log::trace;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use std::net::IpAddr;
 use xlb_common::net::IpVersion;
 use xlb_common::types::Backend;
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, JsonSchema)]
-pub struct Host {
-    pub name: String,
-    pub ip: IpAddr,
-}
 
 /// Responsible for maintaining a live list of
 /// backend nodes traffic should be routed to.

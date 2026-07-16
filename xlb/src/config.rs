@@ -1,13 +1,19 @@
-use crate::provider::Host;
 use anyhow::{Result, bail};
 use config::Config;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::path::PathBuf;
 use xlb_common::config::routing::RoutingMode;
 use xlb_common::net::Proto;
 use xlb_common::types::PortMapping;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, JsonSchema)]
+pub struct Host {
+    pub name: String,
+    pub ip: IpAddr,
+}
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
@@ -70,9 +76,8 @@ const fn default_otel_export_interval() -> u64 {
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub struct XlbConfig {
-    /// Optional name to attach to future otel metrics,
-    /// if not provided defaults to kube service name
-    /// or static-lb for static deployments
+    /// Optional service name attached to OTEL metrics.
+    /// Defaults to "xlb" when omitted.
     pub name: Option<String>,
     /// The IP address to "listen" on which is the expected
     /// dest IP value for inbound packets of interest.
@@ -99,10 +104,9 @@ pub struct XlbConfig {
     #[serde(default = "default_orphan_ttl_secs")]
     #[schemars(range(min = "MIN_ORPHAN_TTL_SECS"))]
     pub orphan_ttl_secs: u32,
-    /// Grace period after a shutdown which is
-    /// used to 'politely' send RSTs to any
-    /// active flows, particularly to allow graceful
-    /// drain after a potential lb A record removal
+    /// Reactive grace period after a shutdown signal.
+    /// Matching TCP packets that arrive during this
+    /// window receive a reset before XLB exits.
     #[serde(default = "default_shutdown_timeout")]
     pub shutdown_timeout: u32,
     /// Optional OpenTelemetry metrics configuration

@@ -1,7 +1,6 @@
 use super::{egress, global, ingress};
-use crate::config::{OtelConfig, OtelProtocol};
+use crate::config::{Host, OtelConfig, OtelProtocol};
 use crate::r#loop::utils::LbFlowStats;
-use crate::provider::Host;
 use anyhow::Result;
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::MeterProvider;

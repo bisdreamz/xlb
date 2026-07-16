@@ -5,6 +5,7 @@ pub struct Ipv6Header<'a> {
     hdr: &'a mut Ipv6Hdr,
 }
 
+#[allow(dead_code)]
 impl<'a> Ipv6Header<'a> {
     pub fn new(ptr: *mut Ipv6Hdr) -> Self {
         Self {

@@ -1,6 +1,5 @@
 use crate::net::eth::MacAddr;
 use network_types::eth::EthHdr;
-use xlb_common::net::IpVersion;
 
 pub struct EthHeader<'a> {
     hdr: &'a mut EthHdr,
@@ -15,15 +14,6 @@ impl<'a> EthHeader<'a> {
 
     pub fn as_ptr(&self) -> *const EthHdr {
         self.hdr as *const EthHdr
-    }
-
-    #[allow(dead_code)]
-    pub fn ip_version(&self) -> Result<IpVersion, ()> {
-        match self.hdr.ether_type() {
-            Ok(network_types::eth::EtherType::Ipv4) => Ok(IpVersion::Ipv4),
-            Ok(network_types::eth::EtherType::Ipv6) => Ok(IpVersion::Ipv6),
-            _ => Err(()),
-        }
     }
 
     pub fn src_mac(&self) -> MacAddr {

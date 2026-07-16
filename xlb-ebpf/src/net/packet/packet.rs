@@ -291,7 +291,7 @@ impl<'a> Packet<'a> {
             IpHeader::Ipv4(ip) => {
                 // Transport parsing currently assumes a fixed IPv4 header and
                 // cannot safely construct a response from fragments.
-                if !ip.supports_rst_response() {
+                if !ip.supports_tcp_processing() {
                     return Err(XlbErr::ErrInvalidOp);
                 }
 

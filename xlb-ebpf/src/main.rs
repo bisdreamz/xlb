@@ -14,9 +14,9 @@ use aya_ebpf::helpers::bpf_redirect;
 use aya_ebpf::macros::map;
 use aya_ebpf::maps::{Array, HashMap};
 use aya_ebpf::{bindings::xdp_action, macros::xdp, programs::XdpContext};
-#[cfg(feature = "verbose-logs")]
-use aya_log_ebpf::trace;
 use aya_log_ebpf::warn;
+#[cfg(feature = "verbose-logs")]
+use aya_log_ebpf::{debug, trace};
 use xlb_common::XlbErr;
 use xlb_common::config::ebpf::EbpfConfig;
 use xlb_common::consts;
@@ -48,11 +48,14 @@ pub fn xlb(ctx: XdpContext) -> u32 {
 
             return xdp_action::XDP_PASS;
         }
-        Err(err) => {
-            let err_str: &'static str = err.into();
-            warn!(&ctx, "Failed to parse packet: {}", err_str);
+        Err(_err) => {
+            #[cfg(feature = "verbose-logs")]
+            {
+                let err_str: &'static str = _err.into();
+                debug!(&ctx, "Dropping malformed packet: {}", err_str);
+            }
 
-            return xdp_action::XDP_ABORTED;
+            return xdp_action::XDP_DROP;
         }
     };
 

@@ -8,6 +8,25 @@ pub fn get_eth_hdr_ptr(ctx: &XdpContext) -> Result<*mut EthHdr, ()> {
 }
 
 #[inline(always)]
-pub fn extract_eth_proto(eth_hdr: *const EthHdr) -> Result<EtherType, ()> {
-    unsafe { *eth_hdr }.ether_type().map_err(|_| ())
+pub fn extract_eth_type(eth_hdr: *const EthHdr) -> u16 {
+    unsafe { (*eth_hdr).ether_type }
+}
+
+#[inline(always)]
+pub const fn is_ipv4_eth_type(ether_type: u16) -> bool {
+    ether_type == EtherType::Ipv4 as u16
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_ipv4_eth_type;
+    use network_types::eth::EtherType;
+
+    #[test]
+    fn only_ipv4_ether_type_enters_network_parsing() {
+        assert!(is_ipv4_eth_type(EtherType::Ipv4 as u16));
+        assert!(!is_ipv4_eth_type(EtherType::Ipv6 as u16));
+        assert!(!is_ipv4_eth_type(0x88cc_u16.to_be())); // LLDP
+        assert!(!is_ipv4_eth_type(0x888e_u16.to_be())); // EAPOL
+    }
 }

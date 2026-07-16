@@ -1,4 +1,5 @@
 use network_types::ip::Ipv4Hdr;
+use network_types::tcp::TcpHdr;
 
 /// Wrapper around IPv4 header for safe manipulation and checksum management.
 ///
@@ -13,10 +14,6 @@ impl<'a> Ipv4Header<'a> {
         Self {
             hdr: unsafe { &mut *ptr },
         }
-    }
-
-    pub fn as_ptr(&self) -> *const Ipv4Hdr {
-        self.hdr as *const Ipv4Hdr
     }
 
     /// Get source IP address in host byte order
@@ -40,17 +37,19 @@ impl<'a> Ipv4Header<'a> {
         self.hdr.ihl()
     }
 
-    /// Whether this header shape can safely be reflected as a TCP reset.
+    /// Whether XLB can safely parse and manipulate TCP at its fixed offset.
     ///
-    /// Transport parsing currently assumes a fixed 20-byte IPv4 header, and
-    /// XLB does not reassemble fragments in XDP.
-    pub fn supports_rst_response(&self) -> bool {
+    /// IPv4 options and fragments are passed untouched because XLB neither
+    /// follows variable header offsets nor performs IP reassembly in XDP.
+    pub fn supports_tcp_processing(&self) -> bool {
         let fragment_flags = self.hdr.frag_flags();
         let unsupported_flags = fragment_flags & !0x2 != 0;
         let nonzero_fragment_offset = self.hdr.frag_offset() != 0;
+        let minimum_total_len = Ipv4Hdr::LEN + TcpHdr::LEN;
 
         self.hdr.version() == 4
             && self.header_len_ihl() as usize == Ipv4Hdr::LEN
+            && self.total_len() as usize >= minimum_total_len
             && !unsupported_flags
             && !nonzero_fragment_offset
     }
@@ -155,22 +154,24 @@ mod tests {
     }
 
     #[test]
-    fn rst_response_requires_fixed_unfragmented_ipv4_header() {
+    fn tcp_processing_requires_fixed_unfragmented_ipv4_header() {
         let cases = [
-            (0x45, 0x0000, true),
-            (0x45, 0x4000, true),
-            (0x46, 0x0000, false),
-            (0x44, 0x0000, false),
-            (0x55, 0x0000, false),
-            (0x45, 0x8000, false),
-            (0x45, 0x2000, false),
-            (0x45, 0x0001, false),
+            (0x45, 0x0000, 40, true),
+            (0x45, 0x4000, 40, true),
+            (0x46, 0x0000, 40, false),
+            (0x44, 0x0000, 40, false),
+            (0x55, 0x0000, 40, false),
+            (0x45, 0x8000, 40, false),
+            (0x45, 0x2000, 40, false),
+            (0x45, 0x0001, 40, false),
+            (0x45, 0x0000, 39, false),
         ];
 
-        for (vihl, fragments, expected) in cases {
+        for (vihl, fragments, total_len, expected) in cases {
             let mut raw = ipv4_header(vihl, fragments);
+            raw.set_tot_len(total_len);
             let header = Ipv4Header::new(&mut raw);
-            assert_eq!(header.supports_rst_response(), expected);
+            assert_eq!(header.supports_tcp_processing(), expected);
         }
     }
 

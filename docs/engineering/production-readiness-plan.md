@@ -189,11 +189,12 @@ sums the fixed header. Until full option handling exists, validate/reject that
 packet shape before TCP manipulation rather than emitting a malformed packet.
 
 IPv4 fragmentation needs its own explicit policy. Non-initial fragments do not
-contain a TCP header, but the current fixed-offset protocol path can interpret
-payload bytes as one. XDP should safely Pass or Drop fragmented traffic before
-TCP parsing (policy must be documented), and tests must cover first fragments,
-non-initial fragments, and malicious short fragments. XLB will not perform IP
-reassembly in XDP.
+contain a TCP header, but a fixed-offset protocol path can interpret payload
+bytes as one. XLB passes IPv4 options, first fragments, non-initial fragments,
+and declared-short TCP packets untouched before transport parsing; it does not
+perform IP reassembly in XDP. Frames physically truncated before the required
+fixed headers are silently dropped without release packet logging. Valid IPv6
+and non-TCP traffic is likewise passed before unsupported header parsing.
 
 ## Correctness implementation plan
 
@@ -887,16 +888,42 @@ next branch. Do not mix opportunistic cleanup into a TCP correctness branch.
 | 10 | `ephemeral-rst-outcome` | Explicit TCP outcome and port-exhaustion `XDP_TX` fix | Implemented and independently reviewed |
 | 11 | `tcp-pair-cleanup` | Pair-wide expiry/closure and invariant accounting | Implemented and independently reviewed |
 | 12 | `tcp-syn-idempotency` | SYN-only guard, retransmission reuse, terminal eviction, transactional inserts | Implemented and independently reviewed; privileged map-race coverage deferred under item 6 |
-| 13 | `unsupported-config-packets` | Reject UDP/DSR/IPv6 config; safe IPv4 option/fragment policy | Planned |
-| 14 | `endpoint-slice-discovery` | Shared nullable-condition model and both consumers | Planned |
-| 15 | `status-health-api` | `StatusSnapshot`, `/healthz`, `/readyz`, JSON and mini status page | Planned |
-| 16 | `backend-health-checks` | Static checks and optional Kubernetes secondary checks | Planned |
-| 17 | `observability-packaging` | Latency, Collector, Prometheus, Grafana, and alerts | Planned |
+| 13 | `unsupported-config-packets` | Reject UDP/DSR/IPv6 config; safe IPv4 option/fragment policy | Implemented and independently reviewed; privileged action coverage deferred under item 6 |
+| 14 | `rust-module-cleanup-07-2026` | Extract pair cleanup and tests from `mloop.rs`, without behavior changes | Planned immediately after item 13 |
+| 15 | `rust-tooling-cleanup-07-2026` | Userspace Clippy baseline, rustfmt invocation, and test-runner documentation | Planned after item 14 |
+| 16 | `endpoint-slice-discovery` | Shared nullable-condition model and both consumers | Planned |
+| 17 | `status-health-api` | `StatusSnapshot`, `/healthz`, `/readyz`, JSON and mini status page | Planned |
+| 18 | `backend-health-checks` | Static checks and optional Kubernetes secondary checks | Planned |
+| 19 | `observability-packaging` | Latency, Collector, Prometheus, Grafana, and alerts | Planned |
 
 After those correctness/product branches, run the benchmark matrix before
 optimizing map scans or round-robin selection and before making comparative
 performance claims. DSR automation, UDP/game support, and full IPv6 remain
 demand-driven follow-ups.
+
+### Maintainability checkpoint after packet correctness
+
+Use two sequential, bounded branches after item 13 rather than combining code
+movement and build-tool policy in one review:
+
+1. `rust-module-cleanup-07-2026` only extracts pair cleanup and its tests from
+   the oversized maintenance-loop module. Do not reorganize the cohesive SYN
+   state machine without a separate concrete defect or proposed boundary. The
+   focused tests must remain unchanged and the generated eBPF object must be
+   byte-identical because this branch is userspace-only movement.
+2. `rust-tooling-cleanup-07-2026` uses separate commits for userspace Clippy
+   fixes and formatter/test-runner documentation. Its lint gate is
+   `cargo clippy --locked --release -p xlb --bin xlb --no-deps`; it must clear
+   that command's current warnings without opportunistic module renames. Use
+   `cargo +nightly fmt --all -- --check` for the repository's nightly rustfmt
+   options. Document the release eBPF test runner and privileged boundary in a
+   separate commit. If either commit expands beyond mechanical changes, split
+   it into another branch before implementation.
+
+Keep packet-path behavior and performance changes out of both branches. Any
+future eBPF cleanup requires the focused eBPF Clippy command, an explicit lint
+baseline/allowlist, generated layout/stack measurements, and an instruction
+diff rather than being folded into these userspace maintenance branches.
 
 ## Open implementation decisions
 

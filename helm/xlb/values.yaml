@@ -75,7 +75,7 @@ config:
   # Listen address (auto or specific IP)
   listen: auto
 
-  # Protocol: tcp or udp
+  # Protocol: tcp (udp is rejected until its dataplane is implemented)
   proto: tcp
 
   # Port mappings
@@ -95,7 +95,7 @@ config:
     #     - name: backend-1
     #       ip: 10.0.1.10
 
-  # Routing mode: nat or dsr
+  # Routing mode: nat (dsr is currently rejected)
   mode: nat
 
   # Orphaned connection TTL (seconds). Values below 300 are raised to 300 at startup.

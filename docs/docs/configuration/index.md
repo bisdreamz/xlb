@@ -15,7 +15,7 @@ name: my-loadbalancer
 # Listen address: auto or specific IP
 listen: auto
 
-# Protocol: tcp (udp not yet supported)
+# Protocol: tcp (udp is rejected at startup)
 proto: tcp
 
 # Port mappings (1-8 mappings)
@@ -30,7 +30,7 @@ provider:
       - name: backend-1
         ip: 10.0.1.10
 
-# Routing mode: nat or dsr (only nat currently supported)
+# Routing mode: nat (dsr is rejected at startup)
 mode: nat
 
 # Orphaned connection TTL (seconds)
@@ -69,7 +69,14 @@ listen:
 proto: tcp
 ```
 
-**Note:** UDP support is planned but not yet implemented.
+**Note:** UDP, DSR, IPv6 listeners, and static IPv6 backends are rejected at
+startup until their dataplane paths are implemented. IPv6-only Kubernetes Pod
+addresses are ignored.
+
+XLB processes standard, unfragmented IPv4/TCP packets. IPv4 options and
+fragments are passed unchanged before TCP parsing; XLB does not reassemble or
+load-balance those packets. Unrelated Ethernet, IPv6, and non-TCP traffic is
+also passed untouched.
 
 ### Port Mappings
 
@@ -125,11 +132,11 @@ backends as their Ready condition and replica count change.
 # NAT mode: packets flow through XLB bidirectionally (default)
 mode: nat
 
-# DSR mode: backends respond directly to clients (not yet implemented)
+# DSR mode is rejected until its dataplane and deployment automation are implemented
 # mode: dsr
 ```
 
-Currently only NAT mode is supported.
+Currently only NAT mode is supported; configuring DSR fails startup.
 
 ### Connection Management
 

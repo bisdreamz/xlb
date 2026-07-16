@@ -200,16 +200,17 @@ and non-TCP traffic is likewise passed before unsupported header parsing.
 
 ### Work item 0: test foundations
 
-The focused Kubernetes/config branches add small control-plane and configuration
-unit tests, but the repository still has no meaningful dataplane packet harness.
-Treat that harness as its own deliverable rather than hiding its cost in
-individual TCP patches.
+Focused control-plane and host-side packet/state tests now cover the implemented
+branches, but the repository still has no real-map dataplane packet harness.
+Treat that harness as its own deliverable rather than hiding its cost in an
+individual TCP patch.
 
 Build two layers:
 
-1. Host-side unit tests for tuple construction, packet flag/state decisions,
-   checksum arithmetic, RST sequence/acknowledgement construction, and timeout
-   helpers.
+1. Continue adding focused host-side unit tests for tuple construction, packet
+   flag/state decisions, checksum arithmetic, RST sequence/acknowledgement
+   construction, and timeout helpers. The current correctness branches include
+   this coverage for their pure decisions and helpers.
 2. A privileged Linux network-namespace/veth integration harness that loads the
    XDP program, sends crafted packets, inspects actions/map state, and verifies
    actual forwarding and returned resets.
@@ -890,7 +891,7 @@ next branch. Do not mix opportunistic cleanup into a TCP correctness branch.
 | 12 | `tcp-syn-idempotency` | SYN-only guard, retransmission reuse, terminal eviction, transactional inserts | Implemented and independently reviewed; privileged map-race coverage deferred under item 6 |
 | 13 | `unsupported-config-packets` | Reject UDP/DSR/IPv6 config; safe IPv4 option/fragment policy | Implemented and independently reviewed; privileged action coverage deferred under item 6 |
 | 14 | `rust-module-cleanup-07-2026` | Extract pair cleanup and tests from `mloop.rs`, without behavior changes | Implemented and independently reviewed |
-| 15 | `rust-tooling-cleanup-07-2026` | Userspace Clippy baseline, stable rustfmt configuration, and test-runner documentation | In progress |
+| 15 | `rust-tooling-cleanup-07-2026` | Userspace Clippy baseline, stable rustfmt configuration, and test-runner documentation | Implemented and independently reviewed |
 | 16 | `endpoint-slice-discovery` | Shared nullable-condition model and both consumers | Planned |
 | 17 | `status-health-api` | `StatusSnapshot`, `/healthz`, `/readyz`, JSON and mini status page | Planned |
 | 18 | `backend-health-checks` | Static checks and optional Kubernetes secondary checks | Planned |
@@ -913,13 +914,14 @@ movement and build-tool policy in one review:
    byte-identical because this branch is userspace-only movement.
 2. `rust-tooling-cleanup-07-2026` uses separate commits for userspace Clippy
    fixes and formatter/test-runner documentation. Its lint gate is
-   `cargo clippy --locked --release -p xlb --bin xlb --no-deps`; it must clear
-   that command's current warnings without opportunistic module renames. Use
-   `cargo fmt --all -- --check` with stable rustfmt. Nightly-only import grouping
-   is intentionally excluded because it produces broad cosmetic churn without
-   improving the correctness gate. Document the release eBPF test runner and
-   privileged boundary in a separate commit. If either commit expands beyond
-   mechanical changes, split it into another branch before implementation.
+   `XLB_EBPF_TOOLCHAIN=nightly-2026-07-09 cargo clippy --locked --release -p xlb --bin xlb --no-deps`;
+   it must clear that command's current warnings without
+   opportunistic module renames. Use `cargo fmt --all -- --check` with stable
+   rustfmt. Nightly-only import grouping is intentionally excluded because it
+   produces broad cosmetic churn without improving the correctness gate.
+   Document the release eBPF test runner and privileged boundary in a separate
+   commit. If either commit expands beyond mechanical changes, split it into
+   another branch before implementation.
 
 Keep packet-path behavior and performance changes out of both branches. Any
 future eBPF cleanup requires the focused eBPF Clippy command, an explicit lint

@@ -1,5 +1,6 @@
 #!/bin/sh
-# Wrapper to execute binaries under sudo by default. Set XLB_DISABLE_SUDO=1 to run without sudo.
+# Workspace runner for binaries that may load and attach XDP.
+# Set XLB_DISABLE_SUDO=1 for host-side tests and other unprivileged commands.
 
 # Skip sudo for xtask (doesn't need elevated privileges)
 case "$1" in

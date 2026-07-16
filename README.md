@@ -30,6 +30,29 @@ pipx install json-schema-for-humans
 XLB_EBPF_TOOLCHAIN=nightly-2026-07-09 cargo build --locked --release
 ```
 
+## Checks and Tests
+
+The optional `scripts/run-with-sudo.sh` runner is useful when an executable may
+load and attach XDP. Unit tests do not need those privileges. In local setups
+that configure the script as Cargo's runner, `XLB_DISABLE_SUDO=1` bypasses sudo
+within the script; it is harmless elsewhere.
+
+```bash
+export XLB_EBPF_TOOLCHAIN=nightly-2026-07-09
+
+cargo fmt --all -- --check
+cargo clippy --locked --release -p xlb --bin xlb --no-deps
+
+XLB_DISABLE_SUDO=1 cargo test --locked --release -p xlb --bin xlb
+XLB_DISABLE_SUDO=1 cargo test --locked -p xlb-ebpf --lib
+XLB_DISABLE_SUDO=1 cargo test --locked -p xlb-common
+```
+
+The userspace test target must use the release profile because its nested debug
+eBPF build enables verbose logging and exceeds the BPF stack limit. These are
+host-side unit tests; the deferred network-namespace/veth dataplane harness will
+require root privileges and XDP-capable Linux interfaces.
+
 ## Documentation
 
 ```bash

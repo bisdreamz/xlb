@@ -98,7 +98,7 @@ config:
   # Routing mode: nat or dsr
   mode: nat
 
-  # Orphaned connection TTL (seconds)
+  # Orphaned connection TTL (seconds). Minimum: 300 (5 minutes).
   orphan_ttl_secs: 300
 
   # Graceful shutdown timeout - should match DNS TTL

@@ -95,8 +95,9 @@ pub struct XlbConfig {
     pub mode: RoutingMode,
     /// The duration by which an inactive flow,
     /// which has not seen any closure, is considered
-    /// orphaned
+    /// orphaned. Must be at least five minutes.
     #[serde(default = "default_orphan_ttl_secs")]
+    #[schemars(range(min = "MIN_ORPHAN_TTL_SECS"))]
     pub orphan_ttl_secs: u32,
     /// Grace period after a shutdown which is
     /// used to 'politely' send RSTs to any
@@ -109,8 +110,10 @@ pub struct XlbConfig {
     pub otel: Option<OtelConfig>,
 }
 
+pub const MIN_ORPHAN_TTL_SECS: u32 = 5 * 60;
+
 const fn default_orphan_ttl_secs() -> u32 {
-    5 * 60
+    MIN_ORPHAN_TTL_SECS
 }
 const fn default_shutdown_timeout() -> u32 {
     15
@@ -127,6 +130,62 @@ impl XlbConfig {
             bail!("Number of port mappings must be between 1 and 8");
         }
 
+        validate_orphan_ttl_secs(config.orphan_ttl_secs)?;
+
         Ok(config)
+    }
+}
+
+fn validate_orphan_ttl_secs(orphan_ttl_secs: u32) -> Result<()> {
+    if orphan_ttl_secs < MIN_ORPHAN_TTL_SECS {
+        bail!("orphan_ttl_secs must be at least {MIN_ORPHAN_TTL_SECS} seconds (5 minutes)");
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use schemars::schema_for;
+
+    #[test]
+    fn schema_advertises_orphan_ttl_minimum() {
+        let schema = schema_for!(XlbConfig);
+        let properties = schema
+            .schema
+            .object
+            .expect("config schema is an object")
+            .properties;
+        let orphan_ttl = properties
+            .get("orphan_ttl_secs")
+            .expect("orphan TTL is in the schema")
+            .clone()
+            .into_object();
+
+        assert_eq!(
+            orphan_ttl
+                .number
+                .expect("orphan TTL has numeric validation")
+                .minimum,
+            Some(f64::from(MIN_ORPHAN_TTL_SECS))
+        );
+    }
+
+    #[test]
+    fn rejects_orphan_ttl_below_five_minutes() {
+        let error = validate_orphan_ttl_secs(MIN_ORPHAN_TTL_SECS - 1)
+            .expect_err("short orphan TTL must be rejected");
+
+        assert_eq!(
+            error.to_string(),
+            "orphan_ttl_secs must be at least 300 seconds (5 minutes)"
+        );
+    }
+
+    #[test]
+    fn accepts_five_minute_orphan_ttl() {
+        validate_orphan_ttl_secs(MIN_ORPHAN_TTL_SECS)
+            .expect("five-minute orphan TTL must be accepted");
     }
 }

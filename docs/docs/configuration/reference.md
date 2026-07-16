@@ -167,11 +167,11 @@ Must be one of:
 | **Format**   | `uint32`  |
 | **Default**  | `300`     |
 
-**Description:** The duration by which an inactive flow, which has not seen any closure, is considered orphaned
+**Description:** The duration by which an inactive flow, which has not seen any closure, is considered orphaned. Must be at least five minutes.
 
 | Restrictions |     |
 | ------------ | --- |
-| **Minimum**  | N/A |
+| **Minimum**  | 300 |
 
 ## <a name="otel"></a>5. Property `XlbConfig > otel`
 

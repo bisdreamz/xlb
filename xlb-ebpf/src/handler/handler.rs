@@ -17,6 +17,11 @@ pub enum PacketEvent {
 
 pub struct PacketHandler;
 
+#[inline(always)]
+const fn should_send_shutdown_rst(shutdown: bool, incoming_rst: bool) -> bool {
+    shutdown && !incoming_rst
+}
+
 impl PacketHandler {
     pub fn handle(
         packet: &mut Packet,
@@ -33,8 +38,8 @@ impl PacketHandler {
         packet_log_debug!(packet, "Matched {}", Into::<&'static str>::into(direction));
 
         match packet.proto_hdr() {
-            ProtoHeader::Tcp(_) => {
-                if shutdown {
+            ProtoHeader::Tcp(tcp) => {
+                if should_send_shutdown_rst(shutdown, tcp.is_rst()) {
                     packet_log_debug!(packet, "Shutting down, attempting to send RST");
                     packet.rst()?;
 
@@ -66,5 +71,18 @@ impl PacketHandler {
             }
             _ => Ok(PacketEvent::Pass),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_send_shutdown_rst;
+
+    #[test]
+    fn shutdown_rst_policy() {
+        assert!(should_send_shutdown_rst(true, false));
+        assert!(!should_send_shutdown_rst(true, true));
+        assert!(!should_send_shutdown_rst(false, false));
+        assert!(!should_send_shutdown_rst(false, true));
     }
 }

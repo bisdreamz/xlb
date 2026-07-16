@@ -37,7 +37,7 @@ provider:
 
 ```bash
 docker run --privileged --network=host \
-  -v $(pwd)/xlb.yaml:/xlb.yaml:ro \
+  -v $(pwd)/xlb.yaml:/app/xlb.yaml:ro \
   emaczura/xlb:latest
 ```
 
@@ -65,7 +65,7 @@ Traffic will be distributed across your backends.
 ```bash
 docker run --privileged --network=host \
   -e RUST_LOG=debug \
-  -v $(pwd)/xlb.yaml:/xlb.yaml:ro \
+  -v $(pwd)/xlb.yaml:/app/xlb.yaml:ro \
   emaczura/xlb:latest
 ```
 
@@ -142,6 +142,6 @@ Enable debug logging:
 ```bash
 docker run --privileged --network=host \
   -e RUST_LOG=trace \
-  -v $(pwd)/xlb.yaml:/xlb.yaml:ro \
+  -v $(pwd)/xlb.yaml:/app/xlb.yaml:ro \
   emaczura/xlb:latest
 ```

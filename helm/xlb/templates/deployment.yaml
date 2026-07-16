@@ -78,7 +78,7 @@ spec:
 
         volumeMounts:
         - name: config
-          mountPath: /xlb.yaml
+          mountPath: /app/xlb.yaml
           subPath: xlb.yaml
           readOnly: true
         - name: bpffs

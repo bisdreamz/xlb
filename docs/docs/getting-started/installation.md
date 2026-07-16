@@ -15,7 +15,7 @@ Contact emaczura@neuronic.dev for early access.
 
 ```bash
 docker run --privileged --network=host \
-  -v $(pwd)/xlb.yaml:/xlb.yaml:ro \
+  -v $(pwd)/xlb.yaml:/app/xlb.yaml:ro \
   emaczura/xlb:latest
 ```
 

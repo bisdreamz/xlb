@@ -36,9 +36,9 @@ provider:
 ## Run XLB
 
 ```bash
-docker run --privileged --network=host \
-  -v $(pwd)/xlb.yaml:/app/xlb.yaml:ro \
-  emaczura/xlb:latest
+docker run --privileged --network=host --stop-timeout 20 \
+  --mount type=bind,source="$(pwd)/xlb.yaml",target=/app/xlb.yaml,readonly \
+  emaczura/xlb:0.1.0
 ```
 
 Expected output:
@@ -63,10 +63,10 @@ Traffic will be distributed across your backends.
 ## Enable Debug Logging
 
 ```bash
-docker run --privileged --network=host \
+docker run --privileged --network=host --stop-timeout 20 \
   -e RUST_LOG=debug \
-  -v $(pwd)/xlb.yaml:/app/xlb.yaml:ro \
-  emaczura/xlb:latest
+  --mount type=bind,source="$(pwd)/xlb.yaml",target=/app/xlb.yaml,readonly \
+  emaczura/xlb:0.1.0
 ```
 
 In debug mode, XLB prints throughput metrics to stdout every second:
@@ -108,7 +108,10 @@ XLB will:
 1. Set SHUTDOWN flag in eBPF
 2. Send RST to new connections
 3. Wait for `shutdown_timeout` (default 15s)
-4. Exit cleanly
+4. Exit cleanly before Docker's 20-second stop timeout
+
+The `--stop-timeout` passed to `docker run` must always be greater than `shutdown_timeout`.
+Docker otherwise sends `SIGKILL` before XLB finishes its shutdown grace period.
 
 ## Next Steps
 
@@ -140,8 +143,8 @@ ip link show | grep xdp
 
 Enable debug logging:
 ```bash
-docker run --privileged --network=host \
+docker run --privileged --network=host --stop-timeout 20 \
   -e RUST_LOG=trace \
-  -v $(pwd)/xlb.yaml:/app/xlb.yaml:ro \
-  emaczura/xlb:latest
+  --mount type=bind,source="$(pwd)/xlb.yaml",target=/app/xlb.yaml,readonly \
+  emaczura/xlb:0.1.0
 ```

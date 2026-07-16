@@ -93,9 +93,9 @@ provider:
 ```
 
 ```bash
-docker run --privileged --network=host \
-  -v $(pwd)/xlb.yaml:/app/xlb.yaml:ro \
-  emaczura/xlb:latest
+docker run --privileged --network=host --stop-timeout 20 \
+  --mount type=bind,source="$(pwd)/xlb.yaml",target=/app/xlb.yaml,readonly \
+  emaczura/xlb:0.1.0
 ```
 
 See [Installation Guide](getting-started/installation.md) for details.

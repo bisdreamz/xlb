@@ -3,7 +3,9 @@ replicaCount: 2
 image:
   repository: emaczura/xlb
   pullPolicy: IfNotPresent
-  tag: "latest"
+  # Defaults to Chart.appVersion when empty. Prefer digest for production releases.
+  tag: ""
+  digest: ""
 
 imagePullSecrets: []
 nameOverride: ""

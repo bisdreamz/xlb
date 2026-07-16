@@ -176,7 +176,7 @@ replicaCount: 2
 
 image:
   repository: emaczura/xlb
-  tag: latest
+  digest: sha256:replace-with-the-published-image-digest
 
 config:
   proto: tcp

@@ -27,10 +27,13 @@ helm install xlb ./helm/xlb -f custom-values.yaml -n xlb --create-namespace
 image:
   repository: emaczura/xlb
   pullPolicy: IfNotPresent
-  tag: "latest"
+  tag: ""       # Defaults to Chart.appVersion
+  digest: ""    # Prefer an immutable sha256:... digest in production
 
 imagePullSecrets: []
 ```
+
+When `digest` is set, the chart deploys `repository@digest` and ignores `tag`.
 
 ### Deployment Configuration
 

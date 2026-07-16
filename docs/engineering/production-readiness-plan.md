@@ -33,7 +33,9 @@ load balancer:
 - Aya was moved back to the public crate release and the XDP flags API was
   updated in commit `73814b5` (`Update aya crate and compat for xdpflags`) on
   `main` and `aya-update-flags`.
-- Release eBPF trace/debug logging was compiled out to remove noisy build output.
+- Release eBPF trace/debug packet logging is compiled out, avoiding Aya log transport on the
+  production packet path. `aya-build` may still present its nested compiler progress with Cargo's
+  `warning:` prefix; those status lines are not runtime packet warnings.
 - The Docker build/runtime modernization is commit `920416a`
   (`Modernize Docker build and runtime image`) on `docker-update-07-2026`.
 - Native/driver XDP is attempted first; generic/SKB mode is the compatibility
@@ -176,17 +178,31 @@ until supported; unrelated IPv6 traffic should take an explicit safe pass path.
 UDP is parsed partially but is not currently rewritten/balanced. Product claims
 must say IPv4/TCP until that changes.
 
+Configuration must fail fast for unsupported dataplane modes. Reject
+`proto: udp`, IPv6 listen addresses, and `mode: dsr` at startup until each path
+is implemented and tested; accepting a configuration that merely passes its
+traffic is operationally unsafe.
+
 IPv4 TCP parsing assumes a 20-byte header. IPv4 options (`IHL > 5`) can therefore
 misplace the TCP header, and the current generated-RST checksum routine only
 sums the fixed header. Until full option handling exists, validate/reject that
 packet shape before TCP manipulation rather than emitting a malformed packet.
 
+IPv4 fragmentation needs its own explicit policy. Non-initial fragments do not
+contain a TCP header, but the current fixed-offset protocol path can interpret
+payload bytes as one. XDP should safely Pass or Drop fragmented traffic before
+TCP parsing (policy must be documented), and tests must cover first fragments,
+non-initial fragments, and malicious short fragments. XLB will not perform IP
+reassembly in XDP.
+
 ## Correctness implementation plan
 
 ### Work item 0: test foundations
 
-The repository currently has no meaningful test suite. Treat the harness as its
-own deliverable rather than hiding its cost in individual patches.
+The focused Kubernetes/config branches add small control-plane and configuration
+unit tests, but the repository still has no meaningful dataplane packet harness.
+Treat that harness as its own deliverable rather than hiding its cost in
+individual TCP patches.
 
 Build two layers:
 
@@ -246,6 +262,10 @@ Mandatory key tests:
 - Userspace and eBPF agree on exact size/layout.
 
 ### Work item 2: explicit TCP outcomes and correct RST emission
+
+This is a logical protocol umbrella, not one implementation branch. Deliver
+shutdown RST handling, shared packet construction, and ephemeral-port outcome
+handling in the separate branches listed in the delivery matrix below.
 
 Replace `Option<PacketFlow>` as an overloaded control signal with an explicit
 outcome type, for example:
@@ -394,12 +414,18 @@ decoded, and formatted in userspace and can create a CPU-consuming log storm.
 Demote expected `ErrOrphanedFlow` packet logging to release-compiled-out debug or
 trace output, and expose aggregate orphan/missing-flow counters instead. Reserve
 warning/error logs for unexpected invariant failures and rate-limit or sample
-any warning that can be triggered by network traffic.
+any warning that can be triggered by network traffic. A surviving flow whose
+stored counterpart is absent is not an expected expired-flow event: represent
+it with a distinct error such as `ErrMissingCounterFlow` and keep that invariant
+visible in release telemetry.
 
 The operating system's TCP keepalive configuration cannot be inferred from the
 initial TCP window, and ordinary keepalive settings are not negotiated in packet
 headers. XLB can only observe packets that actually arrive. A TCP keepalive probe
-and its ACK naturally refresh the appropriate directional entries.
+and its ACK naturally refresh the appropriate directional entries. Endpoints
+that need a connection to survive an otherwise idle period must send keepalives
+or application traffic more frequently than `orphan_ttl_secs`, or the operator
+must configure a longer timeout.
 
 Keep independent timestamps because they expose asymmetric and half-open
 behavior. On expiration, record which side went quiet and then remove the pair;
@@ -421,14 +447,33 @@ retaining the 300-second safety floor.
 ### Current state
 
 - XLB has a custom Pod watcher in `xlb/src/provider/kubernetes.rs`.
-- `rust-ad-exchange` uses the adjacent `kube-discovery` crate.
+- `neuronictechnologies/rust-ad-exchange-ai` (local checkout
+  `../neuronicai/rust-ad-exchange-ai`) uses the adjacent `../kube-discovery` crate.
 - `kube-discovery` also watches Pods selected from a Service; it does not use
   EndpointSlices today.
 - `kube-discovery` uses `kube 0.98` / `k8s-openapi 0.24` while XLB uses
   `kube 2.0` / `k8s-openapi 0.26`.
-- The Helm role grants core `endpoints` and `services`, while current XLB code
-  watches `pods`. A chart-created service account can therefore fail discovery
-  with an authorization error.
+- Before the `kube-watcher-hygiene` branch, Helm granted core `endpoints` and
+  `services` while XLB actually watched `pods`, so chart-created service
+  accounts could fail discovery with an authorization error.
+
+### Interim Pod-watcher hygiene
+
+Keep this work separate from EndpointSlice migration. The focused
+`kube-watcher-hygiene` branch must:
+
+- Treat `deletionTimestamp.is_some()` as ineligible for new flows even if the
+  Pod's Ready condition remains true.
+- Handle watcher `Init`, `InitApply`, and `InitDone` as a complete snapshot,
+  retaining existing backends during the relist and removing entries absent
+  from the completed snapshot.
+- Reconcile by Pod name so an IP replacement cannot leave the old address.
+- Grant the current implementation only `services:get` for the configured
+  Service and `pods:list,watch` in the backend namespace.
+- Render no discovery RBAC for the static provider.
+
+This branch changes eligibility for new connections only. It does not reset or
+remove established flows when a Pod becomes terminating or NotReady.
 
 ### Target shared design
 
@@ -441,9 +486,9 @@ struct ServiceEndpoint {
     ip: IpAddr,
     node: Option<String>,
     zone: Option<String>,
-    ready: bool,
-    serving: bool,
-    terminating: bool,
+    ready: Option<bool>,
+    serving: Option<bool>,
+    terminating: Option<bool>,
 }
 ```
 
@@ -456,17 +501,28 @@ The watcher must:
 - Preserve endpoint conditions rather than collapsing immediately to one list.
 - Support IPv4 now while leaving the model capable of IPv6 later.
 - Upgrade the shared crate to the kube versions used by XLB, then compile/test
-  both XLB and `rust-ad-exchange` against the change.
+  both XLB and `neuronictechnologies/rust-ad-exchange-ai` against the change.
 
 Consumers:
 
-- `rust-ad-exchange` filters itself and converts eligible endpoints into peers.
+- `rust-ad-exchange-ai` filters itself and converts eligible endpoints into peers.
 - XLB uses eligible endpoints for new-flow backend selection and retains
   condition/reason data for status output.
 
-EndpointSlice conditions are the Kubernetes authority:
+Preserve the nullable EndpointSlice values at the shared-library boundary and
+normalize them explicitly: `ready: null` and `serving: null` mean true, while
+`terminating: null` means false. Do not silently map `None` to false.
 
-- `ready`: eligible for new connections.
+`publishNotReadyAddresses` can cause the API to report `ready=true` for
+endpoints that are not Pod-Ready. Before migrating XLB, decide explicitly
+whether new-flow eligibility follows Service publishing policy or preserves
+today's stricter drain behavior. The initial recommendation for XLB is
+`serving && !terminating`; retain `ready` separately for status and policy.
+
+Normalized EndpointSlice conditions then mean:
+
+- `serving && !terminating`: eligible for new connections under the recommended
+  strict XLB policy.
 - `terminating && serving`: not eligible for new connections, but visible as
   draining; existing XLB flows remain untouched.
 - not serving/removed: not eligible; existing flows remain until the endpoint
@@ -476,23 +532,23 @@ Kubernetes documents EndpointSlices as the service-routing source of truth and
 provides `ready`, `serving`, and `terminating` specifically for consumers that
 need correct drain behavior.
 
-### RBAC target
+### EndpointSlice RBAC target
 
 Update Helm RBAC to the resources actually watched:
 
 ```yaml
 - apiGroups: [""]
   resources: ["services"]
-  verbs: ["get", "list", "watch"]
+  verbs: ["get"]
 
 - apiGroups: ["discovery.k8s.io"]
   resources: ["endpointslices"]
   verbs: ["get", "list", "watch"]
 ```
 
-Prefer namespace-scoped permissions when the release and backend Service
-topology permits it. If cross-namespace backend discovery remains a feature,
-document why a ClusterRole is required.
+Use a namespace-scoped Role and RoleBinding in the backend namespace. The
+RoleBinding can name XLB's ServiceAccount in the Helm release namespace, so
+cross-namespace deployment does not itself require a ClusterRole.
 
 ## Active health checks
 
@@ -573,13 +629,16 @@ Status snapshot/page content:
 
 Security/deployment:
 
-- Bind management to localhost by default.
+- Bind management to localhost by default for direct/bare-metal use.
 - Make the bind address/port configurable.
 - Allow optional authentication when exposed beyond localhost.
 - Do not expose client IP/flow detail by default; the page is aggregate/backend
   operational data.
 - Replace the Helm shell probes (`ip link | grep xdp`) with HTTP `/healthz` and
-  `/readyz` probes.
+  `/readyz` probes. Kubernetes `httpGet` normally targets the Pod IP, so the
+  chart must either bind the management listener to the Pod/host-network address
+  for Kubernetes, or set an explicit loopback probe host if the kubelet/network
+  topology supports it. Do not assume a loopback-only default is reachable.
 - Keep the management endpoint off the public load-balanced service unless the
   operator explicitly enables it. Support `kubectl port-forward` for normal
   inspection.
@@ -784,25 +843,38 @@ Until those results exist, prefer a defensible statement such as “XDP-native
 Layer-4 load balancing with predictable low latency and no TCP termination” over
 an unqualified “world's highest performance” claim.
 
-## Recommended landing order
+## Delivery branches and review gates
 
-1. Build test foundations.
-2. Convert to exact `FlowKeyV4` keys.
-3. Introduce explicit TCP outcomes and repair RST behavior.
-4. Land pair-safe cleanup and transactional/idempotent SYN creation together.
-5. Add safe unsupported IPv6/config behavior and align product claims with
-   IPv4/TCP support.
-6. Upgrade/generalize `kube-discovery`, consume EndpointSlices in XLB and
-   `rust-ad-exchange`, and correct Helm RBAC.
-7. Add `StatusSnapshot`, `/healthz`, `/readyz`, JSON status API, and embedded
-   HAProxy-style mini status page; replace shell Helm probes.
-8. Add static/bare-metal health checks and optional Kubernetes secondary checks.
-9. Add active-check latency and passive SYN-to-SYN-ACK backend latency.
-10. Ship Collector, Prometheus, Grafana, and alert examples.
-11. Run/profile the benchmark matrix before optimizing map scans, replacing RR,
-    or making comparative performance claims.
-12. Implement DSR automation, UDP/game support, and full IPv6 according to
-    product demand.
+Logical dependencies do not imply one combined implementation branch. Keep each
+branch narrowly reviewable, use focused commits inside it, and merge branches in
+dependency order. Every branch requires its focused tests, a release build where
+applicable, a written peer review, and resolution of all blocking findings before
+merge. Do not mix opportunistic cleanup into a TCP correctness branch.
+
+| Order | Branch | Scope | Status |
+| --- | --- | --- | --- |
+| 1 | `docker-update-07-2026` | Container/runtime modernization only | Implemented and independently reviewed |
+| 2 | `dependency-refresh-07-2026` | Lockfile refresh only | Implemented and independently reviewed |
+| 3 | `docs-update-07-2026` | Accurate public docs, strict generation, and this durable plan | Implemented; review findings in progress |
+| 4 | `kube-watcher-hygiene` | `deletionTimestamp`, watcher snapshot reconciliation, current Pod RBAC | Implemented and independently reviewed |
+| 5 | `orphan-timeout-guard` | 300-second config/schema floor and expired-flow log-storm guard | Implemented and independently reviewed |
+| 6 | `tcp-test-foundations` | Host-side packet/state tests and reusable privileged netns/veth harness | Planned |
+| 7 | `tcp-flow-key-v4` | Exact map key and tuple identity only | Planned |
+| 8 | `shutdown-rst-correctness` | XLB process-shutdown behavior only; never answer RST with RST | Planned |
+| 9 | `tcp-rst-packet-construction` | Shared TTL/IHL/checksum/sequence and pointer-order safety | Planned |
+| 10 | `ephemeral-rst-outcome` | Explicit TCP outcome and port-exhaustion `XDP_TX` fix | Planned |
+| 11 | `tcp-pair-cleanup` | Pair-wide expiry/closure and invariant accounting | Planned |
+| 12 | `tcp-syn-idempotency` | SYN-only guard, retransmission reuse, terminal eviction, transactional inserts | Planned; merge immediately after pair cleanup review |
+| 13 | `unsupported-config-packets` | Reject UDP/DSR/IPv6 config; safe IPv4 option/fragment policy | Planned |
+| 14 | `endpoint-slice-discovery` | Shared nullable-condition model and both consumers | Planned |
+| 15 | `status-health-api` | `StatusSnapshot`, `/healthz`, `/readyz`, JSON and mini status page | Planned |
+| 16 | `backend-health-checks` | Static checks and optional Kubernetes secondary checks | Planned |
+| 17 | `observability-packaging` | Latency, Collector, Prometheus, Grafana, and alerts | Planned |
+
+After those correctness/product branches, run the benchmark matrix before
+optimizing map scans or round-robin selection and before making comparative
+performance claims. DSR automation, UDP/game support, and full IPv6 remain
+demand-driven follow-ups.
 
 ## Open implementation decisions
 
@@ -862,5 +934,6 @@ independently evictable entries.
 - Current OTEL instruments: `xlb/src/metrics/`
 - Current Kubernetes provider: `xlb/src/provider/kubernetes.rs`
 - Shared discovery crate: `../kube-discovery/`
-- Exchange consumer: `../rust-ad-exchange/src/core/cluster/impls/kube.rs`
+- Exchange consumer:
+  `../neuronicai/rust-ad-exchange-ai/src/core/cluster/impls/kube.rs`
 - Helm RBAC/probes: `helm/xlb/templates/rbac.yaml` and `helm/xlb/values.yaml`

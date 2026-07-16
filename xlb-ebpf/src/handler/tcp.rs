@@ -9,7 +9,7 @@ use aya_ebpf::helpers::bpf_get_prandom_u32;
 use aya_ebpf::maps::{Array, HashMap};
 use xlb_common::XlbErr;
 use xlb_common::config::ebpf::Strategy;
-use xlb_common::types::{Backend, Flow, FlowDirection, FlowKey};
+use xlb_common::types::{Backend, Flow, FlowDirection, FlowKeyV4};
 
 /// Process TCP flow state, backend selection, and packet disposition.
 ///
@@ -24,7 +24,7 @@ pub fn handle_tcp_packet(
     packet: &mut Packet,
     direction: &FlowDirection,
     backends: &'static Array<Backend>,
-    flow_map: &'static HashMap<u64, Flow>,
+    flow_map: &'static HashMap<FlowKeyV4, Flow>,
     strategy: &Strategy,
     port_map_dest: u16,
 ) -> Result<TcpOutcome, XlbErr> {
@@ -71,12 +71,11 @@ fn close_flow(
     direction: &FlowDirection,
     fin: bool,
     rst: bool,
-    flow_map: &'static HashMap<u64, Flow>,
+    flow_map: &'static HashMap<FlowKeyV4, Flow>,
 ) -> Result<(), XlbErr> {
     let flow_key = utils::get_flow_key(packet, direction);
-    let key_hash = flow_key.hash_key();
 
-    let Some(flow_ptr) = flow_map.get_ptr_mut(&key_hash) else {
+    let Some(flow_ptr) = flow_map.get_ptr_mut(&flow_key) else {
         if *direction == FlowDirection::ToServer {
             packet_log_debug!(packet, "Orphaned flow but FIN/RST anyway");
         }
@@ -96,7 +95,7 @@ fn close_flow(
         flow.rst_is_src = true;
     }
 
-    let Some(counter_flow_ptr) = flow_map.get_ptr_mut(&flow.counter_flow_key_hash) else {
+    let Some(counter_flow_ptr) = flow_map.get_ptr_mut(&flow.counter_flow_key) else {
         packet_log_debug!(
             packet,
             "Flow exists but counter-flow missing during RST or FIN!"
@@ -128,14 +127,13 @@ fn close_flow(
 fn existing_flow(
     packet: &mut Packet,
     direction: &FlowDirection,
-    flow_map: &'static HashMap<u64, Flow>,
+    flow_map: &'static HashMap<FlowKeyV4, Flow>,
 ) -> Result<TcpOutcome, XlbErr> {
     let flow_key = utils::get_flow_key(packet, direction);
-    let key_hash = flow_key.hash_key();
 
     packet_log_trace!(packet, "Look4flow");
 
-    let flow_ptr = match flow_map.get_ptr_mut(&key_hash) {
+    let flow_ptr = match flow_map.get_ptr_mut(&flow_key) {
         Some(ptr) => ptr,
         None => {
             if *direction == FlowDirection::ToClient {
@@ -163,21 +161,26 @@ fn existing_flow(
     }))
 }
 
-/// Makes 5 attempts to locate a free ephemeral
-/// port between us and the associated backend
-/// Returns a ['FlowKey'] representing the
-/// ['ToClient'] flow and ephemeral port allocated
+/// Try up to five random translation ports for the backend.
+///
+/// The returned [`FlowKeyV4`] is the exact tuple expected on the
+/// [`FlowDirection::ToClient`] response path.
 #[inline(always)]
 fn find_ephemeral_port(
     backend: &Backend,
-    flow_map: &'static HashMap<u64, Flow>,
-) -> Result<FlowKey, XlbErr> {
+    backend_port: u16,
+    flow_map: &'static HashMap<FlowKeyV4, Flow>,
+) -> Result<FlowKeyV4, XlbErr> {
     for _ in 0..5 {
-        let src_port = (unsafe { bpf_get_prandom_u32() } % 50000) as u16 + 5000;
-        let client_flow_key = utils::client_flow_key(backend.ip, src_port);
-        let client_key_hash = client_flow_key.hash_key();
+        let ephemeral_port = (unsafe { bpf_get_prandom_u32() } % 50000) as u16 + 5000;
+        let client_flow_key = utils::client_flow_key(
+            backend.ip as u32,
+            backend.src_iface_ip as u32,
+            backend_port,
+            ephemeral_port,
+        );
 
-        if unsafe { flow_map.get(&client_key_hash).is_none() } {
+        if unsafe { flow_map.get(&client_flow_key).is_none() } {
             return Ok(client_flow_key);
         }
     }
@@ -191,7 +194,7 @@ fn new_flow(
     packet: &mut Packet,
     backend: &Backend,
     dest_map_port: u16,
-    flow_map: &'static HashMap<u64, Flow>,
+    flow_map: &'static HashMap<FlowKeyV4, Flow>,
 ) -> Result<PacketFlow, XlbErr> {
     let egress_iface = Iface {
         idx: backend.src_iface_ifindex,
@@ -202,12 +205,11 @@ fn new_flow(
 
     let now_ns = utils::monotonic_time_ns();
     let packet_flow;
-    let server_key_hash;
-    let client_key_hash;
+    let server_key;
+    let client_key;
 
     {
-        let client_key = find_ephemeral_port(backend, flow_map)?;
-        client_key_hash = client_key.hash_key();
+        client_key = find_ephemeral_port(backend, dest_map_port, flow_map)?;
 
         let server_flow = new_flow_to_server(
             packet,
@@ -217,7 +219,12 @@ fn new_flow(
             &client_key,
             now_ns,
         );
-        server_key_hash = utils::server_flow_key(packet.src_ip(), packet.src_port()).hash_key();
+        server_key = utils::server_flow_key(
+            packet.src_ip() as u32,
+            packet.dst_ip() as u32,
+            packet.src_port(),
+            packet.dst_port(),
+        );
 
         // extract and keep server and client flow off diff stack frames
         packet_flow = PacketFlow {
@@ -233,15 +240,14 @@ fn new_flow(
         packet_log_debug!(packet, "Insert client flow");
 
         flow_map
-            .insert(&server_key_hash, &server_flow, 0)
+            .insert(&server_key, &server_flow, 0)
             .map_err(|_| XlbErr::ErrMapInsertFailed)?;
     }
 
-    let client_flow =
-        new_flow_to_client(packet, backend, server_key_hash, packet.dst_ip(), now_ns)?;
+    let client_flow = new_flow_to_client(packet, backend, server_key, packet.dst_ip(), now_ns)?;
 
     flow_map
-        .insert(&client_key_hash, &client_flow, 0)
+        .insert(&client_key, &client_flow, 0)
         .map_err(|_| XlbErr::ErrMapInsertFailed)?;
 
     Ok(packet_flow)
@@ -252,7 +258,7 @@ fn new_flow_to_server(
     backend: &Backend,
     dest_map_port: u16,
     egress_iface: &Iface,
-    client_flow_key: &FlowKey,
+    client_flow_key: &FlowKeyV4,
     now_ns: u64,
 ) -> Flow {
     let to_server = Flow {
@@ -260,7 +266,7 @@ fn new_flow_to_server(
         client_ip: packet.src_ip(),
         backend_ip: backend.ip,
         src_ip: egress_iface.src_ip,
-        src_port: client_flow_key.port,
+        src_port: client_flow_key.dst_port(),
         dst_port: dest_map_port,
         dst_ip: backend.ip,
         dst_mac: egress_iface.mac,
@@ -275,7 +281,8 @@ fn new_flow_to_server(
         fin_both_ns: 0,
         rst_ns: 0,
         rst_is_src: false,
-        counter_flow_key_hash: client_flow_key.hash_key(),
+        counter_flow_key: *client_flow_key,
+        _reserved: [0; 7],
     };
 
     to_server
@@ -284,7 +291,7 @@ fn new_flow_to_server(
 fn new_flow_to_client(
     packet: &mut Packet,
     backend: &Backend,
-    counter_flow_key_hash: u64,
+    counter_flow_key: FlowKeyV4,
     ext_src_ip: u128,
     now_ns: u64,
 ) -> Result<Flow, XlbErr> {
@@ -310,6 +317,7 @@ fn new_flow_to_client(
         fin_is_src: false,
         rst_ns: 0,
         rst_is_src: false,
-        counter_flow_key_hash,
+        counter_flow_key,
+        _reserved: [0; 7],
     })
 }

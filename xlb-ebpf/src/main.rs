@@ -20,7 +20,7 @@ use aya_log_ebpf::warn;
 use xlb_common::XlbErr;
 use xlb_common::config::ebpf::EbpfConfig;
 use xlb_common::consts;
-use xlb_common::types::{Backend, Flow};
+use xlb_common::types::{Backend, Flow, FlowKeyV4};
 
 /// Shared global state config stored in a map for runtime updates
 #[map(name = "CONFIG")]
@@ -32,7 +32,8 @@ static CONFIG: Array<EbpfConfig> = Array::with_max_entries(1, 0);
 static BACKENDS: Array<Backend> = Array::with_max_entries(consts::MAX_BACKENDS, 0);
 
 #[map(name = "FLOW_MAP")]
-static mut FLOW_MAP: HashMap<u64, Flow> = HashMap::with_max_entries(consts::MAX_ACTIVE_FLOWS, 0);
+static mut FLOW_MAP: HashMap<FlowKeyV4, Flow> =
+    HashMap::with_max_entries(consts::MAX_ACTIVE_FLOWS, 0);
 
 #[map(name = "SHUTDOWN")]
 static SHUTDOWN: Array<u8> = Array::with_max_entries(1, 0);

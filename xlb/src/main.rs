@@ -14,7 +14,7 @@ use log::info;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::signal::unix::{SignalKind, signal};
-use xlb_common::types::{Backend, Flow};
+use xlb_common::types::{Backend, Flow, FlowKeyV4};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -60,7 +60,7 @@ async fn main() -> anyhow::Result<()> {
         .take_map("BACKENDS")
         .ok_or_else(|| anyhow!("Failed to load BACKENDS map"))?
         .try_into()?;
-    let ebpf_flows: HashMap<_, u64, Flow> = ebpf
+    let ebpf_flows: HashMap<_, FlowKeyV4, Flow> = ebpf
         .take_map("FLOW_MAP")
         .ok_or_else(|| anyhow!("Failed to load FLOW_MAP map"))?
         .try_into()?;

@@ -8,7 +8,7 @@ use crate::packet_log_debug;
 use aya_ebpf::maps::{Array, HashMap};
 use xlb_common::XlbErr;
 use xlb_common::config::ebpf::EbpfConfig;
-use xlb_common::types::{Backend, Flow};
+use xlb_common::types::{Backend, Flow, FlowKeyV4};
 
 pub enum PacketEvent {
     Pass,
@@ -28,7 +28,7 @@ impl PacketHandler {
         packet: &mut Packet,
         config: &EbpfConfig,
         backends: &'static Array<Backend>,
-        flow_map: &'static HashMap<u64, Flow>,
+        flow_map: &'static HashMap<FlowKeyV4, Flow>,
         shutdown: bool,
     ) -> Result<PacketEvent, XlbErr> {
         let (direction, port_map) = match utils::should_process_packet(config, packet) {

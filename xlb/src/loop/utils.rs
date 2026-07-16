@@ -2,7 +2,7 @@ use crate::r#loop::metrics::Metrics;
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 use xlb_common::types::FlowDirection::ToClient;
-use xlb_common::types::{Flow, FlowDirection};
+use xlb_common::types::{Flow, FlowDirection, FlowKeyV4};
 
 #[derive(Debug, Clone, Default)]
 pub struct AggregateFlowStats {
@@ -68,11 +68,11 @@ fn add_flow_stats(
 
 pub fn aggregate_flow_stats<'a>(
     event_ns: u64,
-    flows: impl Iterator<Item = (u64, Flow)>,
-    prev_flow_stats: &HashMap<u64, (u64, u64)>,
+    flows: impl Iterator<Item = (FlowKeyV4, Flow)>,
+    prev_flow_stats: &HashMap<FlowKeyV4, (u64, u64)>,
     orphan_ttl: &Duration,
     now_ns: u64,
-) -> (LbFlowStats, HashMap<u64, (u64, u64)>) {
+) -> (LbFlowStats, HashMap<FlowKeyV4, (u64, u64)>) {
     let mut backends_map = HashMap::new();
     let mut totals = AggregateFlowStats::default();
     let mut new_prev_flow_stats = HashMap::new();

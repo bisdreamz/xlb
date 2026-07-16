@@ -10,7 +10,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tokio::time::interval;
 use xlb_common::consts;
-use xlb_common::types::{Backend, Flow};
+use xlb_common::types::{Backend, Flow, FlowKeyV4};
 
 pub struct MaintenanceLoopHandle {
     shutdown: Arc<AtomicBool>,
@@ -29,7 +29,7 @@ pub struct MaintenanceLoop {
     /// Ebpf land backend destination
     ebpf_backends: Array<MapData, Backend>,
     /// Live map of connection flows, see ['Flow']
-    ebpf_flows: HashMap<MapData, u64, Flow>,
+    ebpf_flows: HashMap<MapData, FlowKeyV4, Flow>,
     /// If a flow is active longer than this TTL it is considered
     /// to be an orpaned connection (closed w/o fin or rst)
     orphan_ttl: Duration,
@@ -44,14 +44,14 @@ pub struct MaintenanceLoop {
     /// Per-flow tracking for delta calculations: flow_key -> (bytes, packets)
     /// Prevents underflow when flows are deleted and avoids improper
     /// reported bandwidth dips during connection closures
-    prev_flow_stats: std::collections::HashMap<u64, (u64, u64)>,
+    prev_flow_stats: std::collections::HashMap<FlowKeyV4, (u64, u64)>,
 }
 
 impl MaintenanceLoop {
     pub fn new(
         provider: Arc<dyn BackendProvider>,
         ebpf_backends: Array<MapData, Backend>,
-        ebpf_flows: HashMap<MapData, u64, Flow>,
+        ebpf_flows: HashMap<MapData, FlowKeyV4, Flow>,
         orphan_ttl: Duration,
         tcp_time_wait_ttl: Duration,
     ) -> Self {
@@ -157,7 +157,7 @@ impl MaintenanceLoop {
 }
 
 fn prune_orphaned_or_closed(
-    flow_map: &mut HashMap<MapData, u64, Flow>,
+    flow_map: &mut HashMap<MapData, FlowKeyV4, Flow>,
     now_ns: u64,
     last_run_ns: u64,
     orphan_ttl: &Duration,
@@ -167,7 +167,7 @@ fn prune_orphaned_or_closed(
     let mut rsts = 0;
     let mut orphans = 0;
 
-    let keys_to_delete: Vec<u64> = flow_map
+    let keys_to_delete: Vec<FlowKeyV4> = flow_map
         .iter()
         .flatten()
         .filter_map(|(key, flow)| {

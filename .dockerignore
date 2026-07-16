@@ -1,6 +1,7 @@
 target/
 .git/
 .github/
+/.cargo/
 .idea/
 .vscode/
 docs/

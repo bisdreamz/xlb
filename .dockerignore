@@ -8,5 +8,6 @@ helm/
 *.log
 .env
 .env.*
+/xlb.yaml
 Dockerfile*
 docker-compose*

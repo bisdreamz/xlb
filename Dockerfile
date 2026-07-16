@@ -42,7 +42,7 @@ COPY . .
 
 RUN --mount=type=cache,id=xlb-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=xlb-cargo-git,target=/usr/local/cargo/git/db,sharing=locked \
-    --mount=type=cache,id=xlb-target,target=/build/target,sharing=locked \
+    --mount=type=cache,id=xlb-target-${TARGETARCH}-${RUST_NIGHTLY},target=/build/target,sharing=locked \
     cargo build --locked --release --package xlb \
     && install -D -m 0755 target/release/xlb /out/xlb \
     && strip --strip-unneeded /out/xlb
@@ -58,10 +58,10 @@ RUN apt-get update \
 
 WORKDIR /app
 COPY --from=builder /out/xlb /usr/local/bin/xlb
-COPY xlb.yaml ./xlb.yaml
 
 ENV RUST_LOG=info
 
+# Mount the deployment-specific configuration read-only at /app/xlb.yaml.
 # XLB currently loads and attaches eBPF programs with elevated host privileges.
 USER 0:0
 STOPSIGNAL SIGTERM

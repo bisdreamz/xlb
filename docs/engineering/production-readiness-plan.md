@@ -889,8 +889,8 @@ next branch. Do not mix opportunistic cleanup into a TCP correctness branch.
 | 11 | `tcp-pair-cleanup` | Pair-wide expiry/closure and invariant accounting | Implemented and independently reviewed |
 | 12 | `tcp-syn-idempotency` | SYN-only guard, retransmission reuse, terminal eviction, transactional inserts | Implemented and independently reviewed; privileged map-race coverage deferred under item 6 |
 | 13 | `unsupported-config-packets` | Reject UDP/DSR/IPv6 config; safe IPv4 option/fragment policy | Implemented and independently reviewed; privileged action coverage deferred under item 6 |
-| 14 | `rust-module-cleanup-07-2026` | Extract pair cleanup and tests from `mloop.rs`, without behavior changes | Planned immediately after item 13 |
-| 15 | `rust-tooling-cleanup-07-2026` | Userspace Clippy baseline, rustfmt invocation, and test-runner documentation | Planned after item 14 |
+| 14 | `rust-module-cleanup-07-2026` | Extract pair cleanup and tests from `mloop.rs`, without behavior changes | Implemented and independently reviewed |
+| 15 | `rust-tooling-cleanup-07-2026` | Userspace Clippy baseline, stable rustfmt configuration, and test-runner documentation | In progress |
 | 16 | `endpoint-slice-discovery` | Shared nullable-condition model and both consumers | Planned |
 | 17 | `status-health-api` | `StatusSnapshot`, `/healthz`, `/readyz`, JSON and mini status page | Planned |
 | 18 | `backend-health-checks` | Static checks and optional Kubernetes secondary checks | Planned |
@@ -915,10 +915,11 @@ movement and build-tool policy in one review:
    fixes and formatter/test-runner documentation. Its lint gate is
    `cargo clippy --locked --release -p xlb --bin xlb --no-deps`; it must clear
    that command's current warnings without opportunistic module renames. Use
-   `cargo +nightly fmt --all -- --check` for the repository's nightly rustfmt
-   options. Document the release eBPF test runner and privileged boundary in a
-   separate commit. If either commit expands beyond mechanical changes, split
-   it into another branch before implementation.
+   `cargo fmt --all -- --check` with stable rustfmt. Nightly-only import grouping
+   is intentionally excluded because it produces broad cosmetic churn without
+   improving the correctness gate. Document the release eBPF test runner and
+   privileged boundary in a separate commit. If either commit expands beyond
+   mechanical changes, split it into another branch before implementation.
 
 Keep packet-path behavior and performance changes out of both branches. Any
 future eBPF cleanup requires the focused eBPF Clippy command, an explicit lint

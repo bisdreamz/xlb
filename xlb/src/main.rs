@@ -20,10 +20,10 @@ use xlb_common::types::{Backend, Flow, FlowKeyV4};
 async fn main() -> anyhow::Result<()> {
     env_logger::init();
 
-    system::check_ip_forwarding()?;
-
     let config = XlbConfig::load("xlb.yaml".into())?;
     let iface = system::get_listen_iface(&config.listen)?;
+    config.validate_listen_ip(iface.ip)?;
+    system::check_ip_forwarding()?;
 
     info!("Config {:?}", config);
 

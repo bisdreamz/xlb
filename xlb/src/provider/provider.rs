@@ -47,6 +47,13 @@ pub async fn hosts_to_backends_with_routes(hosts: &[Host]) -> Vec<Backend> {
     let mut backends = Vec::new();
 
     for host in hosts {
+        // Configuration and Kubernetes discovery reject IPv6 earlier. Keep
+        // this final boundary check so no future provider can feed a truncated
+        // u128 address into the IPv4-only dataplane.
+        if host.ip.is_ipv6() {
+            continue;
+        }
+
         let mut backend = Backend::from(host);
 
         match system::populate_backend_route(&mut backend).await {
@@ -69,4 +76,20 @@ pub async fn hosts_to_backends_with_routes(hosts: &[Host]) -> Vec<Backend> {
     }
 
     backends
+}
+
+#[cfg(test)]
+mod tests {
+    use super::hosts_to_backends_with_routes;
+    use crate::config::Host;
+
+    #[tokio::test]
+    async fn route_population_never_emits_ipv6_backends() {
+        let hosts = vec![Host {
+            name: "backend-v6".into(),
+            ip: "2001:db8::20".parse().expect("valid IPv6 test address"),
+        }];
+
+        assert!(hosts_to_backends_with_routes(&hosts).await.is_empty());
+    }
 }

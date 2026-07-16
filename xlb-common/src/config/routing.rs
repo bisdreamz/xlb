@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
 
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[cfg_attr(feature = "user", derive(JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum RoutingMode {

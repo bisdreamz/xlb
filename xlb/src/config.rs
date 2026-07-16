@@ -134,9 +134,47 @@ impl XlbConfig {
             bail!("Number of port mappings must be between 1 and 8");
         }
 
+        config.validate_supported()?;
         config.orphan_ttl_secs = normalize_orphan_ttl_secs(config.orphan_ttl_secs);
 
         Ok(config)
+    }
+
+    fn validate_supported(&self) -> Result<()> {
+        if self.proto != Proto::Tcp {
+            bail!("Unsupported protocol 'udp': XLB currently supports only IPv4/TCP");
+        }
+        if self.mode != RoutingMode::Nat {
+            bail!("Unsupported routing mode 'dsr': XLB currently supports only NAT");
+        }
+
+        if let ListenAddr::Ip(value) = &self.listen {
+            let listen_ip = value.parse::<IpAddr>()?;
+            self.validate_listen_ip(listen_ip)?;
+        }
+
+        if let BackendSource::Static { backends } = &self.provider
+            && let Some(backend) = backends.iter().find(|backend| backend.ip.is_ipv6())
+        {
+            bail!(
+                "Unsupported IPv6 backend '{}' ({}): XLB currently supports only IPv4 backends",
+                backend.name,
+                backend.ip
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Validate an explicitly configured or auto-detected listen address.
+    pub(crate) fn validate_listen_ip(&self, listen_ip: IpAddr) -> Result<()> {
+        if listen_ip.is_ipv6() {
+            bail!(
+                "Unsupported IPv6 listen address '{}': XLB currently supports only IPv4/TCP",
+                listen_ip
+            );
+        }
+        Ok(())
     }
 }
 
@@ -242,5 +280,58 @@ shutdown_timeout: 15
             .expect("config without orphan TTL must load");
 
         assert_eq!(config.orphan_ttl_secs, MIN_ORPHAN_TTL_SECS);
+    }
+
+    #[test]
+    fn load_rejects_unsupported_protocol_and_routing_mode() {
+        let udp = MINIMAL_CONFIG.replace("proto: tcp", "proto: udp");
+        let udp_error = load_test_config("udp", &udp).expect_err("UDP must fail fast");
+        assert!(udp_error.to_string().contains("Unsupported protocol 'udp'"));
+
+        let dsr = MINIMAL_CONFIG.replace("mode: nat", "mode: dsr");
+        let dsr_error = load_test_config("dsr", &dsr).expect_err("DSR must fail fast");
+        assert!(
+            dsr_error
+                .to_string()
+                .contains("Unsupported routing mode 'dsr'")
+        );
+    }
+
+    #[test]
+    fn load_rejects_explicit_ipv6_listen_and_static_backend() {
+        let ipv6_listen = MINIMAL_CONFIG.replace("listen: auto", "listen:\n  ip: \"2001:db8::10\"");
+        let listen_error = load_test_config("ipv6-listen", &ipv6_listen)
+            .expect_err("IPv6 listener must fail fast");
+        assert!(
+            listen_error
+                .to_string()
+                .contains("Unsupported IPv6 listen address")
+        );
+
+        let ipv6_backend = MINIMAL_CONFIG.replace("127.0.0.1", "2001:db8::20");
+        let backend_error = load_test_config("ipv6-backend", &ipv6_backend)
+            .expect_err("IPv6 backend must fail fast");
+        assert!(
+            backend_error
+                .to_string()
+                .contains("Unsupported IPv6 backend 'backend-1'")
+        );
+    }
+
+    #[test]
+    fn runtime_listen_validation_catches_ipv6_auto_detection() {
+        let config =
+            load_test_config("runtime-listen", MINIMAL_CONFIG).expect("minimal config should load");
+
+        assert!(
+            config
+                .validate_listen_ip("192.0.2.10".parse().expect("valid IPv4 test address"))
+                .is_ok()
+        );
+        assert!(
+            config
+                .validate_listen_ip("2001:db8::10".parse().expect("valid IPv6 test address"))
+                .is_err()
+        );
     }
 }

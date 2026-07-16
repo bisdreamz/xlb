@@ -46,8 +46,22 @@ impl KubernetesProvider {
 
     fn extract_pod_host(pod: &Pod) -> Option<Host> {
         let name = pod.metadata.name.clone()?;
-        let pod_ip = pod.status.as_ref()?.pod_ip.as_ref()?.clone();
-        let ip = pod_ip.parse::<IpAddr>().ok()?;
+        let status = pod.status.as_ref()?;
+        let ip = status
+            .pod_ips
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|pod_ip| pod_ip.ip.parse::<IpAddr>().ok())
+            .find(IpAddr::is_ipv4)
+            .or_else(|| status.pod_ip.as_ref()?.parse::<IpAddr>().ok())?;
+        if ip.is_ipv6() {
+            warn!(
+                "Ignoring unsupported IPv6 backend pod {} ({}); XLB currently supports only IPv4 backends",
+                name, ip
+            );
+            return None;
+        }
         Some(Host { name, ip })
     }
 
@@ -285,7 +299,7 @@ impl BackendProvider for KubernetesProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use k8s_openapi::api::core::v1::{PodCondition, PodStatus};
+    use k8s_openapi::api::core::v1::{PodCondition, PodIP, PodStatus};
     use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
     use kube::api::ObjectMeta;
 
@@ -334,6 +348,59 @@ mod tests {
         ));
 
         assert!(!KubernetesProvider::is_pod_ready(&terminating));
+    }
+
+    #[test]
+    fn ipv6_pod_is_not_added_as_a_backend() {
+        let mut backends = Vec::new();
+
+        let update = KubernetesProvider::reconcile_pod(
+            &mut backends,
+            &pod("backend-v6", "2001:db8::20", true),
+        );
+
+        assert_eq!(update, BackendUpdate::Unchanged);
+        assert!(backends.is_empty());
+    }
+
+    #[test]
+    fn ipv6_pod_update_removes_an_existing_ipv4_backend() {
+        let existing = host("backend-1", "10.0.0.1");
+        let mut backends = vec![existing.clone()];
+
+        let update = KubernetesProvider::reconcile_pod(
+            &mut backends,
+            &pod("backend-1", "2001:db8::20", true),
+        );
+
+        assert_eq!(update, BackendUpdate::Removed(existing));
+        assert!(backends.is_empty());
+    }
+
+    #[test]
+    fn dual_stack_pod_uses_ipv4_when_ipv6_is_primary() {
+        let mut dual_stack = pod("backend-dual", "2001:db8::20", true);
+        dual_stack
+            .status
+            .as_mut()
+            .expect("pod helper provides status")
+            .pod_ips = Some(vec![
+            PodIP {
+                ip: "2001:db8::20".into(),
+            },
+            PodIP {
+                ip: "10.0.0.20".into(),
+            },
+        ]);
+        let mut backends = Vec::new();
+
+        let update = KubernetesProvider::reconcile_pod(&mut backends, &dual_stack);
+
+        assert_eq!(
+            update,
+            BackendUpdate::Added(host("backend-dual", "10.0.0.20"))
+        );
+        assert_eq!(backends, vec![host("backend-dual", "10.0.0.20")]);
     }
 
     #[test]

@@ -69,11 +69,8 @@ docker run --privileged --network=host --stop-timeout 20 \
   emaczura/xlb:0.1.0
 ```
 
-In debug mode, XLB prints throughput metrics to stdout every second:
-```
-DEBUG xlb: throughput: 45234 pps, 2.3 Gbps, 1234 active flows
-DEBUG xlb: throughput: 47891 pps, 2.5 Gbps, 1456 active flows
-```
+In debug mode, XLB prints per-direction packet rate, throughput, active-flow, and closure counters
+to stdout every second.
 
 ## Multiple Ports
 
@@ -106,12 +103,14 @@ docker stop <container-id>
 
 XLB will:
 1. Set SHUTDOWN flag in eBPF
-2. Send RST to new connections
+2. Reactively reset matching TCP packets that arrive during shutdown
 3. Wait for `shutdown_timeout` (default 15s)
 4. Exit cleanly before Docker's 20-second stop timeout
 
 The `--stop-timeout` passed to `docker run` must always be greater than `shutdown_timeout`.
 Docker otherwise sends `SIGKILL` before XLB finishes its shutdown grace period.
+
+Idle connections that send no packet during the timeout do not receive a proactive reset.
 
 ## Next Steps
 

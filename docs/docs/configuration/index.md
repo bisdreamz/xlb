@@ -156,14 +156,15 @@ may set a higher timeout when that is not possible.
 
 #### Shutdown Timeout
 
-Grace period during termination to handle DNS propagation:
+Reactive grace period after XLB receives a termination signal:
 
 ```yaml
-# Send RSTs to new connections for 60s during shutdown
+# Remain attached and reset matching TCP packets for 60s during shutdown
 shutdown_timeout: 60
 ```
 
-**Important:** Should match DNS TTL for proper graceful shutdown.
+**Important:** This does not proactively close idle connections. The container or Kubernetes stop
+grace period must be longer than `shutdown_timeout`.
 
 ### OpenTelemetry Metrics
 
@@ -228,8 +229,9 @@ otel:
 XLB validates configuration on startup:
 
 - Port mappings: 1-8 required
-- Backend list: at least 1 backend required for static deployments
-- Invalid fields: will error
+
+Other semantic validation is still being expanded. In particular, unknown YAML fields are currently
+accepted and an empty static backend list is not rejected during parsing.
 
 Check logs for validation errors:
 

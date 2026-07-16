@@ -1,21 +1,21 @@
 # XLB - High-Performance Load Balancer
 
-XLB is a Layer 4 load balancer that routes packets directly at the network layer instead of terminating and re-establishing connections like traditional reverse proxies (HAProxy, Nginx).
+XLB is an IPv4/TCP Layer 4 load balancer that routes packets at the network layer instead of terminating and re-establishing connections like traditional reverse proxies (HAProxy, Nginx).
 
 **How it works:**
 Traditional load balancers act as reverse proxies - they accept your client's connection, then open a separate connection to your backend. This creates overhead: connection setup/teardown, data copying, context switching.
 
 XLB forwards packets directly by rewriting IP addresses and ports in the kernel. Your client's TCP connection flows end-to-end to the backend through XLB - one connection, not two.
 
-**Result:** Lower latency (no proxy overhead), higher throughput (no connection duplication), lower CPU usage.
+This architecture avoids TCP termination and userspace packet copying in the load-balancing path.
+Its performance still depends on the NIC, kernel, packet mix, connection churn, and whether native
+driver XDP is available.
 
 ## Performance
 
-- **>100,000 requests/second** per instance
-- **Multiple Gbps throughput** per instance
-- 2-4 CPU cores, 256MB RAM
-
-Built with eBPF/XDP for kernel-level packet processing.
+XLB is built for native-driver XDP packet processing, with generic/SKB XDP as a compatibility
+fallback. Reproducible benchmark results and comparison methodology have not yet been published, so
+capacity should be established with the intended hardware and OpenRTB traffic profile.
 
 ## Current Features
 
@@ -23,7 +23,7 @@ Built with eBPF/XDP for kernel-level packet processing.
 - **Packet forwarding** - Direct end-to-end connections, not reverse proxy
 - **Static backends** - Configure fixed backend IPs
 - **Kubernetes discovery** - Automatic backend updates from K8s services
-- **Graceful shutdown** - Connection draining with RST packets during termination
+- **Reactive shutdown** - Reset matching traffic that arrives during a termination grace window
 - **OpenTelemetry metrics** - Export stats to your monitoring system
 
 ## What XLB Doesn't Do
@@ -58,7 +58,7 @@ lb.example.com → 10.0.1.11
 lb.example.com → 10.0.1.12
 ```
 
-On Kubernetes, use ExternalDNS to automatically manage A records as pods scale.
+On Kubernetes, ExternalDNS can manage a record for the XLB Service's load-balancer address.
 
 ## Use Cases
 
@@ -66,8 +66,8 @@ On Kubernetes, use ExternalDNS to automatically manage A records as pods scale.
 
 - Cost-effective alternative to expensive cloud provider NLBs (AWS NLB, GCP Network Load Balancer)
 - Portable L4 load balancing across clouds, on-prem, and bare metal
-- Services processing millions of requests per second where reverse proxies become CPU bottlenecks
-- Low-latency requirements where reverse proxy overhead (1-5ms) is unacceptable
+- High packet-rate services where avoiding TCP termination and userspace packet copies is valuable
+- Latency-sensitive systems that can validate XLB against their own packet and connection profile
 - Simple L4 forwarding without the operational complexity of HAProxy/NGINX
 
 **When NOT to use XLB:**

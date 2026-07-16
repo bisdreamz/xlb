@@ -30,7 +30,7 @@ helm install xlb ./helm/xlb \
 
 ### Backend Discovery
 
-XLB watches Kubernetes Endpoints for the configured service:
+XLB reads the configured Service selector and watches matching Pods:
 
 ```yaml
 # values.yaml
@@ -41,7 +41,8 @@ config:
       service: backend-service
 ```
 
-The load balancer will automatically discover and route to all healthy endpoints of `backend-service`.
+New flows are assigned only to matching Pods that are Ready and not terminating. Established flows
+remain pinned to their selected backend while it drains.
 
 ### Port Mapping
 
@@ -75,16 +76,16 @@ externalDNS:
 1. XLB Service created with LoadBalancer IP
 2. ExternalDNS watches Service annotations
 3. DNS record created: `lb.example.com` → LoadBalancer IP
-4. On pod termination, endpoint removed → ExternalDNS updates DNS
+
+Backend Pod changes do not normally change the XLB Service's load-balancer address or DNS record.
 
 ### Graceful Shutdown
 
-XLB implements graceful shutdown to handle DNS propagation delays:
+XLB implements a reactive shutdown grace period:
 
 ```yaml
 config:
-  # Grace period to send RSTs to new connections during shutdown
-  # Should match DNS TTL to allow DNS propagation
+  # How long XLB remains attached after SIGTERM and resets matching TCP traffic
   shutdown_timeout: 60
 
 # Kubernetes termination grace period
@@ -93,14 +94,15 @@ terminationGracePeriodSeconds: 90
 ```
 
 **Shutdown flow:**
-1. Pod receives SIGTERM
-2. preStop hook creates `/tmp/shutdown` file
-3. Readiness probe fails immediately
-4. Pod removed from Service endpoints
-5. ExternalDNS detects change and updates DNS (within 30s)
-6. XLB sends RST to new connections for `shutdown_timeout` period
-7. DNS propagates (based on TTL)
-8. Pod exits gracefully
+1. Kubernetes runs the `preStop` hook, which creates `/tmp/shutdown`.
+2. The readiness probe fails and Kubernetes removes the XLB Pod from eligible Service endpoints.
+3. Kubernetes sends SIGTERM after the hook completes.
+4. XLB sets its eBPF shutdown flag and remains attached for `shutdown_timeout`.
+5. Traffic that actually reaches the XLB during that window receives a reset response.
+6. XLB exits and detaches the program after the timeout.
+
+This mechanism is reactive: XLB does not transmit anything for an idle connection that sends no
+packet during the grace window. `terminationGracePeriodSeconds` must exceed `shutdown_timeout`.
 
 ### Pod Anti-Affinity
 
@@ -139,16 +141,15 @@ dnsPolicy: ClusterFirstWithHostNet
 ```yaml
 resources:
   requests:
-    cpu: 2000m      # 2 cores minimum
+    cpu: 2000m
     memory: 256Mi
   limits:
-    cpu: 4000m      # Scale up for >100k RPS
+    cpu: 4000m
     memory: 512Mi
 ```
 
-**Performance scaling:**
-- 2 cores: ~100k RPS
-- 4 cores: ~200k+ RPS
+Size requests and limits from measurements on your NIC, kernel, packet sizes, connection churn, and
+whether XLB attached in native-driver or generic/SKB mode. Published benchmark guidance is planned.
 
 ## OpenTelemetry Metrics
 

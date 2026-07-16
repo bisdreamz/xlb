@@ -50,13 +50,13 @@
 | ---------------------------------------- | ------- | ---------------- | ---------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | - [listen](#listen )                     | No      | object           | No         | In         | The IP address to "listen" on which is the expected dest IP value for inbound packets of interest. Default to auto which will pick the primary address of the interface associated with the default route. |
 | - [mode](#mode )                         | No      | object           | No         | In         | Routing mode of either nat or dsr, presently only nat is supported                                                                                                                                         |
-| - [name](#name )                         | No      | string or null   | No         | -          | Optional name to attach to future otel metrics, if not provided defaults to kube service name or static-lb for static deployments                                                                          |
+| - [name](#name )                         | No      | string or null   | No         | -          | Optional service name attached to OTEL metrics. Defaults to "xlb" when omitted.                                                                                                                            |
 | - [orphan_ttl_secs](#orphan_ttl_secs )   | No      | integer          | No         | -          | The duration by which an inactive flow, which has not seen any closure, is considered orphaned. Must be at least five minutes.                                                                              |
 | - [otel](#otel )                         | No      | Combination      | No         | -          | Optional OpenTelemetry metrics configuration                                                                                                                                                               |
 | + [ports](#ports )                       | No      | array            | No         | -          | The port mappings of inbound to backend dest ports. E.g. [80 -> 8080], [443 -> 443]                                                                                                                        |
 | - [proto](#proto )                       | No      | enum (of string) | No         | In         | The target protocol to proxy to the backends e.g. tcp or udp                                                                                                                                               |
 | + [provider](#provider )                 | No      | object           | No         | In         | The source of backend hosts to load balance to                                                                                                                                                             |
-| - [shutdown_timeout](#shutdown_timeout ) | No      | integer          | No         | -          | Grace period after a shutdown which is used to 'politely' send RSTs to any active flows, particularly to allow graceful drain after a potential lb A record removal                                        |
+| - [shutdown_timeout](#shutdown_timeout ) | No      | integer          | No         | -          | Reactive grace period after a shutdown signal. Matching TCP packets that arrive during this window receive a reset before XLB exits.                                                                       |
 
 ## <a name="listen"></a>1. Property `XlbConfig > listen`
 
@@ -156,7 +156,7 @@ Must be one of:
 | **Type**     | `string or null` |
 | **Required** | No               |
 
-**Description:** Optional name to attach to future otel metrics, if not provided defaults to kube service name or static-lb for static deployments
+**Description:** Optional service name attached to OTEL metrics. Defaults to "xlb" when omitted.
 
 ## <a name="orphan_ttl_secs"></a>4. Property `XlbConfig > orphan_ttl_secs`
 
@@ -500,11 +500,8 @@ Must be one of:
 | **Format**   | `uint32`  |
 | **Default**  | `15`      |
 
-**Description:** Grace period after a shutdown which is used to 'politely' send RSTs to any active flows, particularly to allow graceful drain after a potential lb A record removal
+**Description:** Reactive grace period after a shutdown signal. Matching TCP packets that arrive during this window receive a reset before XLB exits.
 
 | Restrictions |     |
 | ------------ | --- |
 | **Minimum**  | N/A |
-
-----------------------------------------------------------------------------------------------------------------------------
-Generated using [json-schema-for-humans](https://github.com/coveooss/json-schema-for-humans) on 2025-12-30 at 13:46:19 -0600

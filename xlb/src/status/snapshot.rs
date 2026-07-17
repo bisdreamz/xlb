@@ -110,14 +110,18 @@ impl StatusState {
 
         add_to_totals(&mut inner.totals, &stats.totals);
 
-        let present_backend_ips: HashSet<IpAddr> = discovered_hosts
-            .iter()
-            .map(|host| host.ip)
-            .chain(stats.backends.keys().copied().map(packed_ip))
-            .collect();
-        inner
-            .backend_totals
-            .retain(|address, _| present_backend_ips.contains(address));
+        // Absence from a partial map iteration is not evidence that a
+        // removed backend has finished draining.
+        if stats.flow_map_complete {
+            let present_backend_ips: HashSet<IpAddr> = discovered_hosts
+                .iter()
+                .map(|host| host.ip)
+                .chain(stats.backends.keys().copied().map(packed_ip))
+                .collect();
+            inner
+                .backend_totals
+                .retain(|address, _| present_backend_ips.contains(address));
+        }
         for (backend_ip, aggregate) in &stats.backends {
             add_to_totals(
                 inner
@@ -147,7 +151,7 @@ impl StatusState {
             &inner.backend_totals,
         );
         let discovered_backends = backends.iter().filter(|backend| backend.discovered).count();
-        let routable_backends = backends
+        let routable_backend_count = backends
             .iter()
             .filter(|backend| backend.available_for_new_connections)
             .count();
@@ -158,7 +162,7 @@ impl StatusState {
                 kind: self.metadata.provider,
                 healthy: provider_healthy,
                 discovered_backends,
-                routable_backends,
+                routable_backends: routable_backend_count,
             },
             directional_flow_entries: stats.flow_map_entries,
             flow_map_complete: stats.flow_map_complete,
@@ -369,14 +373,30 @@ fn backend_statuses(
             ingress: TrafficStatus::default(),
             egress: TrafficStatus::default(),
         });
-        let totals = backend_totals.get(&address).cloned().unwrap_or_default();
-        backend.connections = connection_status(aggregate, sample_seconds, &totals);
-        backend.ingress =
-            traffic_status(&aggregate.to_server, sample_seconds, totals.ingress_bytes);
-        backend.egress = traffic_status(&aggregate.to_client, sample_seconds, totals.egress_bytes);
+        backend.connections =
+            connection_status(aggregate, sample_seconds, &CumulativeTotals::default());
+        backend.ingress = traffic_status(&aggregate.to_server, sample_seconds, 0);
+        backend.egress = traffic_status(&aggregate.to_client, sample_seconds, 0);
+    }
+
+    // A discovered backend may have no current flow-map entries. Retained
+    // counters still belong in that backend's snapshot while it remains
+    // discovered, even though its interval rates and active counts are zero.
+    for (address, backend) in &mut backends {
+        if let Some(totals) = backend_totals.get(address) {
+            apply_cumulative_totals(backend, totals);
+        }
     }
 
     backends.into_values().collect()
+}
+
+fn apply_cumulative_totals(backend: &mut BackendStatus, totals: &CumulativeTotals) {
+    backend.connections.opened_total = totals.opened;
+    backend.connections.closed_total = totals.closed;
+    backend.connections.orphaned_total = totals.orphaned;
+    backend.ingress.bytes_total = totals.ingress_bytes;
+    backend.egress.bytes_total = totals.egress_bytes;
 }
 
 fn add_to_totals(totals: &mut CumulativeTotals, aggregate: &AggregateFlowStats) {

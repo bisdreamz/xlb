@@ -302,7 +302,6 @@ impl MaintenanceLoop {
 }
 
 fn apply_orphan_cleanup_stats(stats: &mut LbFlowStats, cleanup: &CleanupSummary) {
-    stats.totals.to_server.orphaned_conns = 0;
     stats.totals.to_client.orphaned_conns = 0;
     for backend in stats.backends.values_mut() {
         backend.to_server.orphaned_conns = 0;

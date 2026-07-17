@@ -58,6 +58,15 @@ fn stats() -> LbFlowStats {
     stats
 }
 
+fn backend_status<'a>(snapshot: &'a StatusSnapshot, ip: &str) -> &'a BackendStatus {
+    let address = ip.parse::<IpAddr>().expect("valid IP");
+    snapshot
+        .backends
+        .iter()
+        .find(|backend| backend.address == address)
+        .expect("backend is present")
+}
+
 #[test]
 fn readiness_requires_running_fresh_provider_and_routable_backend() {
     let state = StatusState::with_max_sample_age(metadata(), Duration::from_secs(5));
@@ -159,6 +168,155 @@ fn snapshot_reports_rates_totals_and_unavailable_draining_backends() {
     assert!(snapshot.backends[0].available_for_new_connections);
     assert!(!snapshot.backends[1].discovered);
     assert_eq!(snapshot.backends[1].connections.active, 2);
+}
+
+#[test]
+fn backend_totals_remain_monotonic_while_a_discovered_backend_is_idle() {
+    let state = StatusState::new(metadata());
+    let hosts = [host("backend-a", "10.0.0.1")];
+    let routable = [backend("10.0.0.1")];
+    let backend_ip = u128::from(0x0a00_0001_u32);
+
+    let mut active = LbFlowStats {
+        sample_duration_seconds: 2.0,
+        flow_map_complete: true,
+        ..Default::default()
+    };
+    let mut active_backend = AggregateFlowStats::default();
+    active_backend.to_server.active_conns = 2;
+    active_backend.to_server.new_conns = 4;
+    active_backend.to_server.closed_total_conns = 1;
+    active_backend.to_server.orphaned_conns = 1;
+    active_backend.to_server.bytes_transferred = 1_000;
+    active_backend.to_client.closed_total_conns = 2;
+    active_backend.to_client.bytes_transferred = 500;
+    active.backends.insert(backend_ip, active_backend);
+
+    state.publish(&active, &hosts, &routable, true);
+    let first = state.snapshot();
+    let first_backend = backend_status(&first, "10.0.0.1");
+    assert_eq!(first_backend.connections.active, 2);
+    assert_eq!(first_backend.connections.opened_total, 4);
+    assert_eq!(first_backend.connections.closed_total, 3);
+    assert_eq!(first_backend.connections.orphaned_total, 1);
+    assert_eq!(first_backend.ingress.bytes_total, 1_000);
+    assert_eq!(first_backend.egress.bytes_total, 500);
+
+    let idle = LbFlowStats {
+        sample_duration_seconds: 2.0,
+        flow_map_complete: true,
+        ..Default::default()
+    };
+    state.publish(&idle, &hosts, &routable, true);
+    let idle_snapshot = state.snapshot();
+    let idle_backend = backend_status(&idle_snapshot, "10.0.0.1");
+    assert_eq!(idle_backend.connections.active, 0);
+    assert_eq!(idle_backend.connections.opened_per_second, 0.0);
+    assert_eq!(idle_backend.connections.opened_total, 4);
+    assert_eq!(idle_backend.connections.closed_total, 3);
+    assert_eq!(idle_backend.connections.orphaned_total, 1);
+    assert_eq!(idle_backend.ingress.bytes_per_second, 0.0);
+    assert_eq!(idle_backend.ingress.bytes_total, 1_000);
+    assert_eq!(idle_backend.egress.bytes_total, 500);
+
+    let mut reappeared = idle;
+    let mut reappeared_backend = AggregateFlowStats::default();
+    reappeared_backend.to_server.new_conns = 2;
+    reappeared_backend.to_server.closed_total_conns = 1;
+    reappeared_backend.to_server.bytes_transferred = 200;
+    reappeared_backend.to_client.closed_total_conns = 1;
+    reappeared_backend.to_client.bytes_transferred = 100;
+    reappeared.backends.insert(backend_ip, reappeared_backend);
+
+    state.publish(&reappeared, &hosts, &routable, true);
+    let reappeared_snapshot = state.snapshot();
+    let reappeared_backend = backend_status(&reappeared_snapshot, "10.0.0.1");
+    assert_eq!(reappeared_backend.connections.opened_total, 6);
+    assert_eq!(reappeared_backend.connections.closed_total, 5);
+    assert_eq!(reappeared_backend.connections.orphaned_total, 1);
+    assert_eq!(reappeared_backend.ingress.bytes_total, 1_200);
+    assert_eq!(reappeared_backend.egress.bytes_total, 600);
+}
+
+#[test]
+fn removing_a_backend_discards_totals_after_its_draining_flows_end() {
+    let state = StatusState::new(metadata());
+    let hosts = [host("backend-a", "10.0.0.1")];
+    let routable = [backend("10.0.0.1")];
+    let mut active = LbFlowStats {
+        sample_duration_seconds: 1.0,
+        flow_map_complete: true,
+        ..Default::default()
+    };
+    let mut aggregate = AggregateFlowStats::default();
+    aggregate.to_server.new_conns = 3;
+    active
+        .backends
+        .insert(u128::from(0x0a00_0001_u32), aggregate);
+
+    state.publish(&active, &hosts, &routable, true);
+    assert_eq!(
+        backend_status(&state.snapshot(), "10.0.0.1")
+            .connections
+            .opened_total,
+        3
+    );
+
+    let mut draining = LbFlowStats {
+        sample_duration_seconds: 1.0,
+        flow_map_complete: true,
+        ..Default::default()
+    };
+    draining
+        .backends
+        .insert(u128::from(0x0a00_0001_u32), AggregateFlowStats::default());
+    state.publish(&draining, &[], &[], true);
+    let draining_snapshot = state.snapshot();
+    let draining_backend = backend_status(&draining_snapshot, "10.0.0.1");
+    assert!(!draining_backend.discovered);
+    assert_eq!(draining_backend.connections.opened_total, 3);
+
+    let incomplete = LbFlowStats {
+        sample_duration_seconds: 1.0,
+        flow_map_complete: false,
+        ..Default::default()
+    };
+    state.publish(&incomplete, &[], &[], true);
+    assert!(state.snapshot().backends.is_empty());
+
+    let mut reappeared = LbFlowStats {
+        sample_duration_seconds: 1.0,
+        flow_map_complete: true,
+        ..Default::default()
+    };
+    let mut reappeared_aggregate = AggregateFlowStats::default();
+    reappeared_aggregate.to_server.new_conns = 2;
+    reappeared
+        .backends
+        .insert(u128::from(0x0a00_0001_u32), reappeared_aggregate);
+    state.publish(&reappeared, &[], &[], true);
+    assert_eq!(
+        backend_status(&state.snapshot(), "10.0.0.1")
+            .connections
+            .opened_total,
+        5
+    );
+
+    let idle = LbFlowStats {
+        sample_duration_seconds: 1.0,
+        flow_map_complete: true,
+        ..Default::default()
+    };
+    state.publish(&idle, &[], &[], true);
+    assert!(state.snapshot().backends.is_empty());
+
+    state.publish(&idle, &hosts, &routable, true);
+    assert_eq!(
+        backend_status(&state.snapshot(), "10.0.0.1")
+            .connections
+            .opened_total,
+        0
+    );
 }
 
 #[test]

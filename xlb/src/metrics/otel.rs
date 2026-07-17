@@ -1,4 +1,4 @@
-use super::{egress, global, ingress};
+use super::{egress, global, ingress, resource};
 use crate::config::{Host, OtelConfig, OtelProtocol};
 use crate::r#loop::utils::LbFlowStats;
 use anyhow::Result;
@@ -63,11 +63,37 @@ pub fn init(config: &OtelConfig, service_name: String) -> Result<()> {
         .with_interval(Duration::from_secs(config.export_interval_secs))
         .build();
 
+    let mut resource_attributes = vec![
+        KeyValue::new("service.name", service_name.clone()),
+        KeyValue::new("service.version", env!("CARGO_PKG_VERSION")),
+    ];
+    let pod_name = std::env::var("POD_NAME").ok();
+    let pod_namespace = std::env::var("POD_NAMESPACE").ok();
+
+    if let Some(pod_name) = &pod_name {
+        resource_attributes.push(KeyValue::new("k8s.pod.name", pod_name.clone()));
+    }
+    if let Some(namespace) = &pod_namespace {
+        resource_attributes.push(KeyValue::new("k8s.namespace.name", namespace.clone()));
+        resource_attributes.push(KeyValue::new("service.namespace", namespace.clone()));
+    }
+    if let Ok(node_name) = std::env::var("NODE_NAME") {
+        resource_attributes.push(KeyValue::new("k8s.node.name", node_name));
+    }
+    if let Ok(pod_uid) = std::env::var("POD_UID") {
+        resource_attributes.push(KeyValue::new("service.instance.id", pod_uid.clone()));
+        resource_attributes.push(KeyValue::new("k8s.pod.uid", pod_uid));
+    } else if let Some(pod_name) = pod_name {
+        let instance_id = pod_namespace.map_or(pod_name.clone(), |namespace| {
+            format!("{namespace}/{pod_name}")
+        });
+        resource_attributes.push(KeyValue::new("service.instance.id", instance_id));
+    } else if let Ok(hostname) = std::env::var("HOSTNAME") {
+        resource_attributes.push(KeyValue::new("service.instance.id", hostname));
+    }
+
     let resource = Resource::builder()
-        .with_attributes(vec![
-            KeyValue::new("service.name", service_name.clone()),
-            KeyValue::new("service.version", env!("CARGO_PKG_VERSION")),
-        ])
+        .with_attributes(resource_attributes)
         .build();
 
     let provider = SdkMeterProvider::builder()
@@ -80,6 +106,7 @@ pub fn init(config: &OtelConfig, service_name: String) -> Result<()> {
     global::init(&meter)?;
     ingress::init(&meter)?;
     egress::init(&meter)?;
+    resource::init(&meter)?;
 
     OTEL_PROVIDER
         .set(provider)
@@ -99,6 +126,7 @@ pub fn log_metrics(stats: &LbFlowStats, backends: &[Host]) {
     global::log_global(stats, backends);
     ingress::log_ingress(stats);
     egress::log_egress(stats);
+    resource::log(&stats.resource_utilization);
 }
 
 /// Record violations of the two-entry flow-map invariant.

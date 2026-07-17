@@ -46,8 +46,10 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("Failed to start backend provider")?;
 
-    let mut ebpf =
-        ebpf::load_ebpf_program(&config, &iface).context("Failed to load eBPF program")?;
+    let ebpf::LoadedEbpf {
+        mut ebpf,
+        attached_interfaces,
+    } = ebpf::load_ebpf_program(&config, &iface).context("Failed to load eBPF program")?;
 
     info!(
         "Started XLB service ({}) on {} ({:?})",
@@ -76,6 +78,7 @@ async fn main() -> anyhow::Result<()> {
         flow_pair_invariants,
         Duration::from_secs(config.orphan_ttl_secs as u64),
         Duration::from_mins(1),
+        attached_interfaces,
     );
 
     let loop_handle = maint_loop.start(Duration::from_secs(1));

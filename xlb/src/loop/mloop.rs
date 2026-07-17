@@ -4,6 +4,7 @@ use crate::r#loop::utils;
 use crate::r#loop::utils::LbFlowStats;
 use crate::metrics;
 use crate::provider::{BackendProvider, hosts_to_backends_with_routes};
+use crate::system::ResourceSampler;
 use aya::maps::{Array, HashMap, MapData, PerCpuArray};
 use log::{debug, trace, warn};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -50,6 +51,10 @@ pub struct MaintenanceLoop {
     /// Prevents underflow when flows are deleted and avoids improper
     /// reported bandwidth dips during connection closures
     prev_flow_stats: std::collections::HashMap<FlowKeyV4, (u64, u64)>,
+    /// Samples the bounded resources used by this XLB instance.
+    resource_sampler: ResourceSampler,
+    /// Suppresses repeated warnings while flow-map iteration remains incomplete.
+    flow_iteration_error_reported: bool,
 }
 
 impl MaintenanceLoop {
@@ -60,6 +65,7 @@ impl MaintenanceLoop {
         flow_pair_invariants: PerCpuArray<MapData, u64>,
         orphan_ttl: Duration,
         tcp_time_wait_ttl: Duration,
+        attached_interfaces: Vec<String>,
     ) -> Self {
         Self {
             shutdown: OnceLock::new(),
@@ -72,6 +78,8 @@ impl MaintenanceLoop {
             last_run_ns: 0,
             last_flow_pair_invariants: 0,
             prev_flow_stats: std::collections::HashMap::new(),
+            resource_sampler: ResourceSampler::new(attached_interfaces),
+            flow_iteration_error_reported: false,
         }
     }
 
@@ -84,19 +92,51 @@ impl MaintenanceLoop {
             log::warn!("No backends available - all new connections will be dropped");
         }
 
+        let mut flow_iteration_errors = 0u64;
+        let mut first_flow_iteration_error = None;
+        let flows = self.ebpf_flows.iter().filter_map(|entry| match entry {
+            Ok(entry) => Some(entry),
+            Err(error) => {
+                flow_iteration_errors = flow_iteration_errors.saturating_add(1);
+                if first_flow_iteration_error.is_none() {
+                    first_flow_iteration_error = Some(error.to_string());
+                }
+                None
+            }
+        });
         let (mut stats, new_prev_flow_stats) = utils::aggregate_flow_stats(
             self.last_run_ns,
-            self.ebpf_flows.iter().flatten(),
+            flows,
             &self.prev_flow_stats,
             &self.orphan_ttl,
             now_ns,
         );
 
+        stats.flow_map_complete = flow_iteration_errors == 0;
+        if flow_iteration_errors > 0 && !self.flow_iteration_error_reported {
+            warn!(
+                "Flow-map iteration was incomplete (errors={}, first={}); suppressing flow-map and combined resource utilization until recovery",
+                flow_iteration_errors,
+                first_flow_iteration_error.as_deref().unwrap_or("unknown")
+            );
+            self.flow_iteration_error_reported = true;
+        } else if flow_iteration_errors == 0 && self.flow_iteration_error_reported {
+            log::info!("Flow-map iteration recovered");
+            self.flow_iteration_error_reported = false;
+        }
+
         stats.available_backends = new_backends.len() as u32;
+        stats.resource_utilization = self
+            .resource_sampler
+            .sample(stats.flow_map_entries, stats.flow_map_complete);
 
         log_pretty_stats(&stats);
         metrics::log_metrics(&stats, &new_hosts);
 
+        // Preserve the pre-existing best-effort flow-stat baseline even when
+        // concurrent map churn makes this iteration incomplete. Completeness
+        // is required for capacity reporting, but not for approximate traffic
+        // counters.
         self.prev_flow_stats = new_prev_flow_stats;
 
         for (i, backend) in new_backends.iter().enumerate() {
@@ -226,6 +266,40 @@ fn log_pretty_stats(stats: &LbFlowStats) {
         stats.totals.client_set.len(),
         stats.available_backends
     );
+
+    if let Some(overall) = stats.resource_utilization.overall_percent {
+        debug!(
+            "\tResource Utilization: overall={:.1}% cpu={:.1}% (host={:.1}% process={:.1}%) network={:.1}% flow_map={:.1}% ({} entries)",
+            overall,
+            stats.resource_utilization.cpu_percent.unwrap_or_default(),
+            stats
+                .resource_utilization
+                .host_cpu_percent
+                .unwrap_or_default(),
+            stats
+                .resource_utilization
+                .process_cpu_percent
+                .unwrap_or_default(),
+            stats
+                .resource_utilization
+                .network_percent
+                .unwrap_or_default(),
+            stats
+                .resource_utilization
+                .flow_map_percent
+                .unwrap_or_default(),
+            stats.flow_map_entries
+        );
+    } else {
+        debug!(
+            "\tResource Utilization incomplete: host_cpu={:?}% process_cpu={:?}% network={:?}% flow_map={:?}% (complete={})",
+            stats.resource_utilization.host_cpu_percent,
+            stats.resource_utilization.process_cpu_percent,
+            stats.resource_utilization.network_percent,
+            stats.resource_utilization.flow_map_percent,
+            stats.flow_map_complete
+        );
+    }
 
     if !stats.backends.is_empty() {
         debug!("\tPer-Backend:");

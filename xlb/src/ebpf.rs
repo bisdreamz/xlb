@@ -9,6 +9,11 @@ use std::net::IpAddr;
 use xlb_common::config::ebpf::{EbpfConfig, Strategy};
 use xlb_common::types::PortMapping;
 
+pub struct LoadedEbpf {
+    pub ebpf: Ebpf,
+    pub attached_interfaces: Vec<String>,
+}
+
 pub fn to_ebpf_config(cfg: &XlbConfig, iface: &ListenIface) -> EbpfConfig {
     let ip_bits = match iface.ip {
         IpAddr::V4(ip) => ip.to_bits() as u128,
@@ -32,7 +37,7 @@ pub fn to_ebpf_config(cfg: &XlbConfig, iface: &ListenIface) -> EbpfConfig {
     }
 }
 
-pub fn load_ebpf_program(config: &XlbConfig, iface: &ListenIface) -> Result<Ebpf> {
+pub fn load_ebpf_program(config: &XlbConfig, iface: &ListenIface) -> Result<LoadedEbpf> {
     let ebpf_config = to_ebpf_config(config, iface);
 
     let mut ebpf = EbpfLoader::new().load(aya::include_bytes_aligned!(concat!(
@@ -75,6 +80,7 @@ pub fn load_ebpf_program(config: &XlbConfig, iface: &ListenIface) -> Result<Ebpf
     let skip_prefixes = ["lo", "cilium", "lxc", "anchor", "cpbridge"];
     let skip_bridges = ["docker0", "virbr"];
 
+    let mut attached_interfaces = Vec::new();
     for interface in interfaces {
         // Skip loopback and bridge interfaces
         if skip_prefixes
@@ -106,6 +112,7 @@ pub fn load_ebpf_program(config: &XlbConfig, iface: &ListenIface) -> Result<Ebpf
         match attach_result {
             Ok(_) => {
                 info!("XDP ATTACHED successfully to interface: {}", interface.name);
+                attached_interfaces.push(interface.name);
             }
             Err(e) => {
                 warn!(
@@ -116,5 +123,8 @@ pub fn load_ebpf_program(config: &XlbConfig, iface: &ListenIface) -> Result<Ebpf
         }
     }
 
-    Ok(ebpf)
+    Ok(LoadedEbpf {
+        ebpf,
+        attached_interfaces,
+    })
 }

@@ -677,6 +677,17 @@ XLB already exports useful global and per-backend values:
 - FIN/RST closure side and type.
 - Per-backend ingress/egress flows.
 - PPS, Mbps, and transferred bytes.
+- Host/process CPU, attached-interface bandwidth, flow-map, and maximum XLB resource utilization as
+  0-100 gauges.
+
+`xlb.resource.utilization` is the maximum of host CPU usage (including XDP softirq work), XLB
+process CPU pressure against its CPU capacity, the busiest direction across successfully attached
+NICs against detected link speed, and directional flow-map entries against map capacity. It
+contains no autoscaling target; HPA/KEDA policy owns the target percentage and replica behavior.
+Do not export a partial combined value when NIC or CPU capacity is unavailable or map iteration is
+incomplete. Preserve each valid component for diagnosis and make the missing capacity visible in
+status output. Treat it as an autoscaling candidate until adapter semantics, per-Pod aggregation,
+and upstream redistribution have been validated under load.
 
 Per-core metrics are not a customer-facing requirement. Per-CPU BPF maps are
 only a possible internal implementation if profiling later shows contention or
@@ -892,10 +903,11 @@ next branch. Do not mix opportunistic cleanup into a TCP correctness branch.
 | 13 | `unsupported-config-packets` | Reject UDP/DSR/IPv6 config; safe IPv4 option/fragment policy | Implemented and independently reviewed; privileged action coverage deferred under item 6 |
 | 14 | `rust-module-cleanup-07-2026` | Extract pair cleanup and tests from `mloop.rs`, without behavior changes | Implemented and independently reviewed |
 | 15 | `rust-tooling-cleanup-07-2026` | Userspace Clippy baseline, stable rustfmt configuration, and test-runner documentation | Implemented and independently reviewed |
-| 16 | `endpoint-slice-discovery` | Shared nullable-condition model and both consumers | Planned |
-| 17 | `status-health-api` | `StatusSnapshot`, `/healthz`, `/readyz`, JSON and mini status page | Planned |
-| 18 | `backend-health-checks` | Static checks and optional Kubernetes secondary checks | Planned |
-| 19 | `observability-packaging` | Latency, Collector, Prometheus, Grafana, and alerts | Planned |
+| 16 | `xlb-resource-utilization` | Host/process CPU, attached-NIC bandwidth, flow-map pressure, and maximum utilization metric | Implemented and independently reviewed |
+| 17 | `endpoint-slice-discovery` | Shared nullable-condition model and both consumers | Planned |
+| 18 | `status-health-api` | `StatusSnapshot`, `/healthz`, `/readyz`, JSON and mini status page | Planned |
+| 19 | `backend-health-checks` | Static checks and optional Kubernetes secondary checks | Planned |
+| 20 | `observability-packaging` | Latency, Collector, Prometheus, Grafana, and alerts | Planned |
 
 After those correctness/product branches, run the benchmark matrix before
 optimizing map scans or round-robin selection and before making comparative

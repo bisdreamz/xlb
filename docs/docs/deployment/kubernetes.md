@@ -171,6 +171,12 @@ config:
 
 **Note:** Deploy OpenTelemetry Collector separately. XLB only exports metrics.
 
+The `xlb.resource.utilization` gauge reports the maximum of host/process CPU pressure,
+attached-interface bandwidth, and flow-map utilization as a value from 0 through 100. It contains
+no built-in scaling target. A later HPA/collector example will validate it through the Kubernetes
+custom metrics API before recommending production scaling defaults. Each deployment will choose
+its own target percentage, replica limits, and stabilization policy.
+
 ## Complete Example
 
 ```yaml

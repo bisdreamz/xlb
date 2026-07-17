@@ -1,4 +1,5 @@
 use crate::r#loop::metrics::Metrics;
+use crate::system::ResourceUtilization;
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 use xlb_common::types::FlowDirection::ToClient;
@@ -17,6 +18,12 @@ pub struct LbFlowStats {
     pub backends: HashMap<u128, AggregateFlowStats>,
     /// Number of available backends from provider
     pub available_backends: u32,
+    /// Number of directional entries currently occupying the flow map.
+    pub flow_map_entries: u64,
+    /// False when Aya could not produce a complete flow-map iteration.
+    pub flow_map_complete: bool,
+    /// CPU, network, flow-map, and combined resource pressure.
+    pub resource_utilization: ResourceUtilization,
 }
 
 impl AggregateFlowStats {
@@ -76,6 +83,7 @@ pub fn aggregate_flow_stats(
     let mut backends_map: HashMap<u128, AggregateFlowStats> = HashMap::new();
     let mut totals = AggregateFlowStats::default();
     let mut new_prev_flow_stats = HashMap::new();
+    let mut flow_map_entries = 0u64;
 
     let delta_ns = now_ns.saturating_sub(event_ns);
     let delta_secs = if delta_ns > 0 {
@@ -85,6 +93,7 @@ pub fn aggregate_flow_stats(
     };
 
     for (key, flow) in flows {
+        flow_map_entries = flow_map_entries.saturating_add(1);
         let (prev_bytes, prev_packets) = prev_flow_stats.get(&key).copied().unwrap_or((0, 0));
         let delta_bytes = flow.bytes_transfer.saturating_sub(prev_bytes);
         let delta_packets = flow.packets_transfer.saturating_sub(prev_packets);
@@ -151,6 +160,9 @@ pub fn aggregate_flow_stats(
             totals,
             backends: backends_map,
             available_backends: 0,
+            flow_map_entries,
+            flow_map_complete: true,
+            resource_utilization: ResourceUtilization::default(),
         },
         new_prev_flow_stats,
     )
@@ -196,5 +208,69 @@ pub fn format_ip(ip: u128) -> String {
         Ipv4Addr::from(ip as u32).to_string()
     } else {
         Ipv6Addr::from(ip).to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn flow(counter_flow_key: FlowKeyV4) -> Flow {
+        Flow {
+            client_ip: 0xc000_0201,
+            backend_ip: 0xc633_6402,
+            src_ip: 0,
+            dst_ip: 0,
+            bytes_transfer: 100,
+            packets_transfer: 1,
+            created_at_ns: 0,
+            last_seen_ns: 1,
+            fin_both_ns: 0,
+            rst_ns: 0,
+            counter_flow_key,
+            direction: FlowDirection::ToServer,
+            src_port: 50_000,
+            dst_port: 80,
+            src_iface_idx: 0,
+            dst_mac: [0; 6],
+            src_mac: [0; 6],
+            fin: false,
+            fin_is_src: false,
+            rst_is_src: false,
+            pair_invalid: false,
+            pair_ready: true,
+            _reserved: [0; 1],
+            pair_tag: 1,
+        }
+    }
+
+    #[test]
+    fn aggregation_reports_directional_flow_map_occupancy() {
+        let to_server = FlowKeyV4::tcp(
+            0xc000_0201,
+            0xcb00_710a,
+            50_000,
+            80,
+            FlowDirection::ToServer,
+        );
+        let to_client = FlowKeyV4::tcp(
+            0xc633_6402,
+            0x0a00_0001,
+            8080,
+            30_000,
+            FlowDirection::ToClient,
+        );
+        let flows = [(to_server, flow(to_client)), (to_client, flow(to_server))];
+
+        let (stats, _) = aggregate_flow_stats(
+            0,
+            flows.into_iter(),
+            &HashMap::new(),
+            &Duration::from_secs(300),
+            1,
+        );
+
+        assert_eq!(stats.flow_map_entries, 2);
+        assert!(stats.flow_map_complete);
     }
 }

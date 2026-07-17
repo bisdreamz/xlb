@@ -189,6 +189,34 @@ otel:
     Authorization: "Bearer token"
 ```
 
+XLB exports resource-utilization gauges as percentages from 0 through 100. This deliberate
+operator-facing representation makes autoscaler targets readable; these are percentages, not the
+0-through-1 ratios used by some OpenTelemetry semantic conventions.
+
+- `xlb.resource.cpu.host.utilization` measures host CPU usage, including the kernel softirq work
+  where XDP executes. The Helm chart's default required anti-affinity places at most one XLB Pod on
+  each node; deployments that override affinity must preserve that constraint.
+- `xlb.resource.cpu.process.utilization` measures XLB process CPU time against its Kubernetes CPU
+  limit, effective cgroup quota, or available CPUs.
+- `xlb.resource.cpu.utilization` is the greater of host and process CPU pressure.
+- `xlb.resource.network.utilization` measures the busiest RX or TX direction across every
+  successfully attached XDP interface against that interface's reported full-duplex link speed.
+- `xlb.resource.flow_map.utilization` measures directional flow-map entries against the map's
+  fixed capacity.
+- `xlb.resource.utilization` is the maximum CPU, network, or flow-map component. XLB does not embed
+  a scaling threshold; operators choose the target percentage in their autoscaler policy.
+
+The combined metric is omitted when CPU or NIC capacity cannot be measured or flow-map iteration is
+incomplete, rather than reporting an unsafe partial value. Component metrics that remain valid
+continue to be exported. Kubernetes resource attributes include the Pod, namespace, node, and
+instance identity when their Downward API environment variables are present.
+
+Treat this as a candidate autoscaling signal until the chosen metrics adapter, per-Pod aggregation,
+and upstream traffic redistribution have been validated for the deployment. Kubernetes normally
+averages a Pods custom metric across replicas; a per-instance alert should separately catch a hot
+XLB node that fleet averaging could hide. Adding replicas only helps when the upstream load balancer
+actually sends new flows to them.
+
 ## Complete Examples
 
 ### Static Deployment

@@ -9,6 +9,7 @@ const XLB_EBPF_TOOLCHAIN: &str = "XLB_EBPF_TOOLCHAIN";
 
 fn main() -> anyhow::Result<()> {
     println!("cargo:rerun-if-env-changed={XLB_EBPF_TOOLCHAIN}");
+    println!("cargo:rerun-if-changed=../admin-ui/dist");
 
     let cargo_metadata::Metadata { packages, .. } = cargo_metadata::MetadataCommand::new()
         .no_deps()

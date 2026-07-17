@@ -2,6 +2,18 @@
 
 ARG RUST_IMAGE=rustlang/rust:nightly-trixie-2026-07-08@sha256:c13f4238a353659e2538b32c10aeb3c1754a4633f57fdd51bd933d62647eb40b
 ARG RUNTIME_IMAGE=debian:trixie-slim@sha256:28de0877c2189802884ccd20f15ee41c203573bd87bb6b883f5f46362d24c5c2
+ARG NODE_IMAGE=node:24-trixie-slim@sha256:ae91dcc111a68c9d2d81ff2a17bda61be126426176fde6fe7d08ab13b7f50573
+
+FROM ${NODE_IMAGE} AS ui-builder
+
+WORKDIR /build/admin-ui
+COPY admin-ui/package.json admin-ui/package-lock.json ./
+
+RUN --mount=type=cache,id=xlb-npm,target=/root/.npm,sharing=locked \
+    npm ci
+
+COPY admin-ui/ ./
+RUN npm run build
 
 FROM ${RUST_IMAGE} AS builder
 
@@ -39,6 +51,7 @@ ENV RUSTUP_TOOLCHAIN=${RUST_NIGHTLY} \
 
 WORKDIR /build
 COPY . .
+COPY --from=ui-builder /build/admin-ui/dist ./admin-ui/dist
 
 RUN --mount=type=cache,id=xlb-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=xlb-cargo-git,target=/usr/local/cargo/git/db,sharing=locked \

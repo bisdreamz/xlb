@@ -1,16 +1,25 @@
 use super::StatusState;
 use anyhow::{Context, Result, anyhow};
-use axum::extract::State;
+use axum::body::Body;
+use axum::extract::{Path, State};
 use axum::http::{HeaderValue, StatusCode, header};
-use axum::response::{IntoResponse, Response};
+use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use log::info;
+use rust_embed::RustEmbed;
+use std::borrow::Cow;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
+
+#[derive(RustEmbed)]
+#[folder = "../admin-ui/dist/"]
+struct AdminUi;
+
+const UI_CONTENT_SECURITY_POLICY: &str = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'";
 
 pub struct AdminServerHandle {
     shutdown: Option<oneshot::Sender<()>>,
@@ -97,7 +106,7 @@ pub async fn start_admin_server(
         let _ = exit_tx.send(result);
     });
 
-    info!("Admin HTTP server listening on http://{local_addr}");
+    info!("Admin HTTP server listening on http://{local_addr} (UI: /admin/)");
     Ok(AdminServerHandle {
         shutdown: Some(shutdown_tx),
         exited: Some(exit_rx),
@@ -107,10 +116,107 @@ pub async fn start_admin_server(
 
 fn router(status: Arc<StatusState>) -> Router {
     Router::new()
+        .route("/", get(admin_redirect))
+        .route("/admin", get(admin_redirect))
+        .route("/admin/", get(admin_index))
+        .route("/admin/{*path}", get(admin_asset))
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
         .route("/api/v1/status", get(api_status))
         .with_state(status)
+}
+
+async fn admin_redirect() -> Redirect {
+    Redirect::permanent("/admin/")
+}
+
+async fn admin_index() -> Response {
+    ui_asset_response("index.html").unwrap_or_else(ui_unavailable_response)
+}
+
+async fn admin_asset(Path(path): Path<String>) -> Response {
+    let path = path.trim_start_matches('/');
+    if path.is_empty() {
+        return admin_index().await;
+    }
+    if path
+        .split('/')
+        .any(|segment| segment.is_empty() || segment == ".." || segment.starts_with('.'))
+    {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    if let Some(response) = ui_asset_response(path) {
+        return response;
+    }
+
+    // Vue Router owns extensionless routes. Missing files must remain a 404 so
+    // a broken deployment cannot accidentally return HTML as JavaScript/CSS.
+    if !path
+        .rsplit('/')
+        .next()
+        .is_some_and(|name| name.contains('.'))
+    {
+        return admin_index().await;
+    }
+
+    StatusCode::NOT_FOUND.into_response()
+}
+
+fn ui_asset_response(path: &str) -> Option<Response> {
+    let asset = AdminUi::get(path)?;
+    let body = match asset.data {
+        Cow::Borrowed(bytes) => Body::from(bytes),
+        Cow::Owned(bytes) => Body::from(bytes),
+    };
+    let cache_control = if path == "index.html" {
+        "no-store"
+    } else if path.starts_with("assets/") {
+        "public, max-age=31536000, immutable"
+    } else {
+        "public, max-age=3600"
+    };
+
+    Some(
+        Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, content_type(path))
+            .header(header::CACHE_CONTROL, cache_control)
+            .header("content-security-policy", UI_CONTENT_SECURITY_POLICY)
+            .header("referrer-policy", "no-referrer")
+            .header("x-content-type-options", "nosniff")
+            .header("x-frame-options", "DENY")
+            .body(body)
+            .expect("valid embedded UI response"),
+    )
+}
+
+fn ui_unavailable_response() -> Response {
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        [
+            (header::CONTENT_TYPE, "text/plain; charset=utf-8"),
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        "XLB admin UI was not built into this binary. Run `npm ci --prefix admin-ui`, `npm run build --prefix admin-ui`, then rebuild XLB.\n",
+    )
+        .into_response()
+}
+
+fn content_type(path: &str) -> &'static str {
+    match path.rsplit('.').next() {
+        Some("html") => "text/html; charset=utf-8",
+        Some("css") => "text/css; charset=utf-8",
+        Some("js") | Some("mjs") => "text/javascript; charset=utf-8",
+        Some("json") | Some("map") => "application/json; charset=utf-8",
+        Some("svg") => "image/svg+xml",
+        Some("png") => "image/png",
+        Some("webp") => "image/webp",
+        Some("ico") => "image/x-icon",
+        Some("woff") => "font/woff",
+        Some("woff2") => "font/woff2",
+        _ => "application/octet-stream",
+    }
 }
 
 async fn healthz(State(status): State<Arc<StatusState>>) -> Response {
@@ -184,6 +290,17 @@ mod tests {
         String::from_utf8(bytes.to_vec()).expect("UTF-8 response")
     }
 
+    async fn request(app: Router, uri: &str) -> Response {
+        app.oneshot(
+            Request::builder()
+                .uri(uri)
+                .body(Body::empty())
+                .expect("valid request"),
+        )
+        .await
+        .expect("admin response")
+    }
+
     #[tokio::test]
     async fn health_is_live_while_readiness_reports_starting() {
         let health = healthz(State(state())).await;
@@ -245,6 +362,72 @@ mod tests {
 
         assert_eq!(status_response.status(), StatusCode::OK);
         assert_eq!(old_path_response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn admin_ui_redirects_and_serves_spa_routes_safely() {
+        let app = router(state());
+        let redirect = request(app.clone(), "/").await;
+        assert_eq!(redirect.status(), StatusCode::PERMANENT_REDIRECT);
+        assert_eq!(
+            redirect.headers().get(header::LOCATION),
+            Some(&HeaderValue::from_static("/admin/"))
+        );
+
+        let index = request(app.clone(), "/admin/").await;
+        if AdminUi::get("index.html").is_none() {
+            assert_eq!(index.status(), StatusCode::SERVICE_UNAVAILABLE);
+            assert!(body(index).await.contains("admin UI was not built"));
+            return;
+        }
+
+        assert_eq!(index.status(), StatusCode::OK);
+        assert_eq!(
+            index.headers().get(header::CONTENT_TYPE),
+            Some(&HeaderValue::from_static("text/html; charset=utf-8"))
+        );
+        assert_eq!(
+            index.headers().get(header::CACHE_CONTROL),
+            Some(&HeaderValue::from_static("no-store"))
+        );
+        assert!(index.headers().contains_key("content-security-policy"));
+        assert!(body(index).await.contains("<div id=\"app\"></div>"));
+
+        let history_route = request(app.clone(), "/admin/backends").await;
+        assert_eq!(history_route.status(), StatusCode::OK);
+        assert!(body(history_route).await.contains("<div id=\"app\"></div>"));
+
+        let javascript = AdminUi::iter()
+            .find(|path| path.ends_with(".js"))
+            .expect("built UI contains JavaScript")
+            .into_owned();
+        let asset = request(app.clone(), &format!("/admin/{javascript}")).await;
+        assert_eq!(asset.status(), StatusCode::OK);
+        assert_eq!(
+            asset.headers().get(header::CACHE_CONTROL),
+            Some(&HeaderValue::from_static(
+                "public, max-age=31536000, immutable"
+            ))
+        );
+        assert_eq!(
+            asset.headers().get(header::CONTENT_TYPE),
+            Some(&HeaderValue::from_static("text/javascript; charset=utf-8"))
+        );
+
+        let missing_asset = request(app, "/admin/assets/missing.js").await;
+        assert_eq!(missing_asset.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn admin_ui_content_types_do_not_depend_on_browser_sniffing() {
+        assert_eq!(content_type("index.html"), "text/html; charset=utf-8");
+        assert_eq!(content_type("assets/app.css"), "text/css; charset=utf-8");
+        assert_eq!(
+            content_type("assets/app.js"),
+            "text/javascript; charset=utf-8"
+        );
+        assert_eq!(content_type("favicon.svg"), "image/svg+xml");
+        assert_eq!(content_type("unknown.bin"), "application/octet-stream");
     }
 
     #[tokio::test]

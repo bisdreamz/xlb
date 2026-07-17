@@ -19,21 +19,30 @@ struct NetworkInterfaceSampler {
     name: String,
     path: PathBuf,
     link_speed_bps: Option<f64>,
+    capacity_is_configured: bool,
     previous: Option<NetworkCounters>,
     capacity_error_reported: bool,
     counter_error_reported: bool,
 }
 
 impl NetworkInterfaceSampler {
-    fn new(name: String) -> Self {
+    fn new(name: String, configured_capacity_mbps: Option<u64>) -> Self {
         let path = Path::new("/sys/class/net").join(&name);
-        let link_speed_bps = read_link_speed_bps(&path.join("speed"));
+        let configured_link_speed_bps =
+            configured_capacity_mbps.map(|capacity_mbps| capacity_mbps as f64 * 1_000_000.0);
+        let link_speed_bps =
+            configured_link_speed_bps.or_else(|| read_link_speed_bps(&path.join("speed")));
 
         if let Some(link_speed_bps) = link_speed_bps {
             info!(
-                "Network resource capacity: interface={} link_speed_mbps={:.0}",
+                "Network resource capacity: interface={} capacity_mbps={:.0} source={}",
                 name,
-                link_speed_bps / 1_000_000.0
+                link_speed_bps / 1_000_000.0,
+                if configured_link_speed_bps.is_some() {
+                    "configured"
+                } else {
+                    "driver"
+                }
             );
         } else {
             warn!(
@@ -46,6 +55,7 @@ impl NetworkInterfaceSampler {
             name,
             path,
             link_speed_bps,
+            capacity_is_configured: configured_link_speed_bps.is_some(),
             previous: None,
             capacity_error_reported: link_speed_bps.is_none(),
             counter_error_reported: false,
@@ -95,6 +105,10 @@ impl NetworkInterfaceSampler {
     }
 
     fn refresh_link_speed(&mut self) {
+        if self.capacity_is_configured {
+            return;
+        }
+
         let speed_path = self.path.join("speed");
         let Some(current) = read_link_speed_bps(&speed_path) else {
             if !self.capacity_error_reported {
@@ -139,7 +153,7 @@ pub(super) struct NetworkSampler {
 }
 
 impl NetworkSampler {
-    pub(super) fn new(mut interfaces: Vec<String>) -> Self {
+    pub(super) fn new(mut interfaces: Vec<String>, configured_capacity_mbps: Option<u64>) -> Self {
         interfaces.sort_unstable();
         interfaces.dedup();
 
@@ -157,7 +171,7 @@ impl NetworkSampler {
         Self {
             interfaces: interfaces
                 .into_iter()
-                .map(NetworkInterfaceSampler::new)
+                .map(|interface| NetworkInterfaceSampler::new(interface, configured_capacity_mbps))
                 .collect(),
             snapshot_error_reported: false,
             last_link_speed_refresh: Instant::now(),
@@ -319,5 +333,24 @@ mod tests {
             Some(70.0)
         );
         assert_eq!(complete_max([Some(20.0), None].into_iter()), None);
+    }
+
+    #[test]
+    fn configured_capacity_supports_virtual_interfaces_without_reported_speed() {
+        let mut sampler =
+            NetworkInterfaceSampler::new("interface-that-does-not-exist".to_string(), Some(2_000));
+
+        assert_eq!(sampler.link_speed_bps, Some(2_000_000_000.0));
+        assert!(sampler.capacity_is_configured);
+
+        let sampled_at = Instant::now();
+        assert_eq!(sampler.sample(sampled_at, Some((0, 0))), None);
+        assert_eq!(
+            sampler.sample(
+                sampled_at + Duration::from_secs(1),
+                Some((125_000_000, 25_000_000)),
+            ),
+            Some(50.0)
+        );
     }
 }

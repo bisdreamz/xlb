@@ -37,7 +37,9 @@
     - [9.2.1. Property `XlbConfig > provider > oneOf > item 1 > kubernetes`](#provider_oneOf_i1_kubernetes)
       - [9.2.1.1. Property `XlbConfig > provider > oneOf > item 1 > kubernetes > namespace`](#provider_oneOf_i1_kubernetes_namespace)
       - [9.2.1.2. Property `XlbConfig > provider > oneOf > item 1 > kubernetes > service`](#provider_oneOf_i1_kubernetes_service)
-- [10. Property `XlbConfig > shutdown_timeout`](#shutdown_timeout)
+- [10. Property `XlbConfig > resources`](#resources)
+  - [10.1. Property `XlbConfig > resources > network_capacity_mbps`](#resources_network_capacity_mbps)
+- [11. Property `XlbConfig > shutdown_timeout`](#shutdown_timeout)
 
 **Title:** XlbConfig
 
@@ -60,6 +62,7 @@
 | + [ports](#ports )                       | No      | array            | No         | -          | The port mappings of inbound to backend dest ports. E.g. [80 -> 8080], [443 -> 443]                                                                                                                        |
 | - [proto](#proto )                       | No      | enum (of string) | No         | In         | The target protocol to proxy to the backends e.g. tcp or udp                                                                                                                                               |
 | + [provider](#provider )                 | No      | object           | No         | In         | The source of backend hosts to load balance to                                                                                                                                                             |
+| - [resources](#resources )               | No      | object           | No         | In         | Optional resource-capacity overrides for virtualized environments.                                                                                                                                         |
 | - [shutdown_timeout](#shutdown_timeout ) | No      | integer          | No         | -          | Reactive grace period after a shutdown signal. Matching TCP packets that arrive during this window receive a reset before XLB exits.                                                                       |
 
 ## <a name="admin"></a>1. Property `XlbConfig > admin`
@@ -537,7 +540,39 @@ Must be one of:
 | **Type**     | `string` |
 | **Required** | Yes      |
 
-## <a name="shutdown_timeout"></a>10. Property `XlbConfig > shutdown_timeout`
+## <a name="resources"></a>10. Property `XlbConfig > resources`
+
+|                           |                  |
+| ------------------------- | ---------------- |
+| **Type**                  | `object`         |
+| **Required**              | No               |
+| **Additional properties** | Any type allowed |
+| **Defined in**            |                  |
+
+**Description:** Optional resource-capacity overrides for virtualized environments.
+
+| Property                                                     | Pattern | Type            | Deprecated | Definition | Title/Description                                                                                                                                                                                                                                             |
+| ------------------------------------------------------------ | ------- | --------------- | ---------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| - [network_capacity_mbps](#resources_network_capacity_mbps ) | No      | integer or null | No         | -          | Per-interface network capacity in megabits per second.<br /><br />Physical NIC drivers usually report this through sysfs. Cloud and virtual NICs commonly report an unknown speed, in which case this value supplies the denominator for network utilization. |
+
+### <a name="resources_network_capacity_mbps"></a>10.1. Property `XlbConfig > resources > network_capacity_mbps`
+
+|              |                   |
+| ------------ | ----------------- |
+| **Type**     | `integer or null` |
+| **Required** | No                |
+| **Format**   | `uint64`          |
+| **Default**  | `null`            |
+
+**Description:** Per-interface network capacity in megabits per second.
+
+Physical NIC drivers usually report this through sysfs. Cloud and virtual NICs commonly report an unknown speed, in which case this value supplies the denominator for network utilization.
+
+| Restrictions |     |
+| ------------ | --- |
+| **Minimum**  | N/A |
+
+## <a name="shutdown_timeout"></a>11. Property `XlbConfig > shutdown_timeout`
 
 |              |           |
 | ------------ | --------- |

@@ -106,6 +106,18 @@ const fn default_admin_port() -> u16 {
     9090
 }
 
+/// Capacity inputs that cannot always be discovered from virtual hardware.
+#[derive(Debug, Clone, Deserialize, Default, JsonSchema)]
+pub struct ResourceConfig {
+    /// Per-interface network capacity in megabits per second.
+    ///
+    /// Physical NIC drivers usually report this through sysfs. Cloud and
+    /// virtual NICs commonly report an unknown speed, in which case this
+    /// value supplies the denominator for network utilization.
+    #[serde(default)]
+    pub network_capacity_mbps: Option<u64>,
+}
+
 /// The user facing application config
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
@@ -149,6 +161,9 @@ pub struct XlbConfig {
     /// Local health, readiness, and administrative status API.
     #[serde(default)]
     pub admin: AdminConfig,
+    /// Optional resource-capacity overrides for virtualized environments.
+    #[serde(default)]
+    pub resources: ResourceConfig,
 }
 
 pub const MIN_ORPHAN_TTL_SECS: u32 = 5 * 60;
@@ -180,6 +195,9 @@ impl XlbConfig {
     fn validate_supported(&self) -> Result<()> {
         if self.admin.port == 0 {
             bail!("Admin API port must be between 1 and 65535");
+        }
+        if self.resources.network_capacity_mbps == Some(0) {
+            bail!("Network capacity must be greater than zero megabits per second");
         }
 
         if self.proto != Proto::Tcp {
@@ -334,6 +352,25 @@ shutdown_timeout: 15
             config.admin.socket_addr(),
             "127.0.0.1:9090".parse().expect("valid socket address")
         );
+        assert_eq!(config.resources.network_capacity_mbps, None);
+    }
+
+    #[test]
+    fn load_accepts_virtual_nic_capacity_override() {
+        let yaml = format!("{MINIMAL_CONFIG}\nresources:\n  network_capacity_mbps: 2000\n");
+        let config = load_test_config("network-capacity", &yaml)
+            .expect("positive network capacity must load");
+
+        assert_eq!(config.resources.network_capacity_mbps, Some(2_000));
+    }
+
+    #[test]
+    fn load_rejects_zero_virtual_nic_capacity() {
+        let yaml = format!("{MINIMAL_CONFIG}\nresources:\n  network_capacity_mbps: 0\n");
+        let error = load_test_config("zero-network-capacity", &yaml)
+            .expect_err("zero network capacity cannot produce utilization");
+
+        assert!(error.to_string().contains("Network capacity"));
     }
 
     #[test]

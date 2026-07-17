@@ -58,7 +58,8 @@ The Helm chart configures HTTP probes against XLB's loopback-only admin API:
 - `/healthz` is the liveness endpoint.
 - `/readyz` becomes ready only with a healthy provider, a fresh dataplane sample, and at least one
   routable backend.
-- `/api/v1/status` exposes the versioned operational JSON used by the future admin page.
+- `/api/v1/status` exposes the versioned operational JSON used by the embedded admin page.
+- `/admin/` serves the local-instance console from the same loopback-only listener.
 
 The admin listener defaults to `127.0.0.1:9090`. Because it is unauthenticated and includes backend
 addresses, do not bind it externally without deployment-level access controls.
@@ -76,8 +77,8 @@ Configure which ports XLB listens on and forwards to backends:
 ```yaml
 config:
   ports:
-    - local_port: 80      # XLB listens on port 80
-      remote_port: 8080   # Forwards to backend port 8080
+    - local_port: 80 # XLB listens on port 80
+      remote_port: 8080 # Forwards to backend port 8080
     - local_port: 443
       remote_port: 8443
 ```
@@ -94,10 +95,11 @@ service:
 
 externalDNS:
   enabled: true
-  ttl: 60  # DNS record TTL in seconds
+  ttl: 60 # DNS record TTL in seconds
 ```
 
 **How it works:**
+
 1. XLB Service created with LoadBalancer IP
 2. ExternalDNS watches Service annotations
 3. DNS record created: `lb.example.com` → LoadBalancer IP
@@ -119,6 +121,7 @@ terminationGracePeriodSeconds: 90
 ```
 
 **Shutdown flow:**
+
 1. Kubernetes sends SIGTERM.
 2. XLB immediately marks `/readyz` unavailable so endpoint removal can begin.
 3. XLB sets its eBPF shutdown flag and remains attached for `shutdown_timeout`.
@@ -156,6 +159,7 @@ dnsPolicy: ClusterFirstWithHostNet
 ```
 
 **Note:** This means:
+
 - XLB pods bind directly to node ports
 - Only one XLB pod per node (enforced by anti-affinity)
 - Service ports must not conflict with other hostNetwork pods
@@ -198,6 +202,11 @@ attached-interface bandwidth, and flow-map utilization as a value from 0 through
 no built-in scaling target. A later HPA/collector example will validate it through the Kubernetes
 custom metrics API before recommending production scaling defaults. Each deployment will choose
 its own target percentage, replica limits, and stabilization policy.
+
+Physical NICs normally report their link speed directly. For cloud or virtual NICs that report an
+unknown speed, set `config.resources.network_capacity_mbps` in the Helm values to the provider's
+documented per-interface limit. XLB continues to read live byte counters from the attached
+interfaces; the override supplies only the capacity denominator.
 
 ## Complete Example
 
@@ -245,6 +254,7 @@ resources:
 ```
 
 Deploy:
+
 ```bash
 helm install xlb ./helm/xlb -f xlb-values.yaml -n xlb --create-namespace
 ```
@@ -284,6 +294,7 @@ kubectl logs -n xlb <pod-name> -f
 ```
 
 Expected behavior:
+
 1. XLB receives SIGTERM and `/readyz` begins returning `503`.
 2. The eBPF shutdown flag is set.
 3. Matching packets receive RST responses during `shutdown_timeout`.

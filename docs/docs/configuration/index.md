@@ -44,6 +44,10 @@ admin:
   address: 127.0.0.1
   port: 9090
 
+# Optional for virtual NICs whose driver reports an unknown link speed
+resources:
+  network_capacity_mbps: 2000
+
 # Optional OpenTelemetry metrics
 otel:
   enabled: true
@@ -156,8 +160,8 @@ XLB serves a small, unauthenticated operational API on `127.0.0.1:9090` by defau
 - `GET /readyz` returns `200` only after the dataplane has a fresh sample, the backend provider is
   healthy, and at least one backend is routable for new connections. It returns `503` with a stable
   machine-readable reason otherwise.
-- `GET /api/v1/status` returns the versioned JSON snapshot that will also back the administrative
-  UI.
+- `GET /api/v1/status` returns the versioned JSON snapshot consumed by the administrative UI.
+- `GET /admin/` serves the embedded local-instance console.
 
 ```yaml
 admin:
@@ -170,8 +174,8 @@ authentication. Keep it on loopback unless the deployment environment provides a
 
 The JSON snapshot includes lifecycle/readiness, provider and dataplane state, discovered and
 routable backends, active and cumulative connection counts, traffic rates and totals, flow-map
-state, and resource utilization. A backend that has left discovery but still owns established flows
-remains visible until those flows close.
+state, per-interface native or generic XDP attachment mode, and resource utilization. A backend that
+has left discovery but still owns established flows remains visible until those flows close.
 
 For Kubernetes discovery, watch errors retain the last-known-good backend set and retry with the
 kube runtime's default backoff. Provider health in this API version means the initial sync completed
@@ -198,6 +202,7 @@ application traffic more frequently than `orphan_ttl_secs`; deployments may set 
 when that is not possible.
 
 **Use cases:**
+
 - Scanner connections that never close
 - Half-open connections from crashed clients
 - Prevents connection table exhaustion
@@ -223,7 +228,7 @@ otel:
   enabled: true
   endpoint: "http://opentelemetry-collector:4317"
   export_interval_secs: 10
-  protocol: grpc  # or http
+  protocol: grpc # or http
   # Optional authentication headers
   headers:
     Authorization: "Bearer token"
@@ -240,7 +245,8 @@ operator-facing representation makes autoscaler targets readable; these are perc
   limit, effective cgroup quota, or available CPUs.
 - `xlb.resource.cpu.utilization` is the greater of host and process CPU pressure.
 - `xlb.resource.network.utilization` measures the busiest RX or TX direction across every
-  successfully attached XDP interface against that interface's reported full-duplex link speed.
+  successfully attached XDP interface against that interface's full-duplex capacity. XLB uses the
+  driver-reported link speed by default, or `resources.network_capacity_mbps` when configured.
 - `xlb.resource.flow_map.utilization` measures directional flow-map entries against the map's
   fixed capacity.
 - `xlb.resource.utilization` is the maximum CPU, network, or flow-map component. XLB does not embed
@@ -250,6 +256,17 @@ The combined metric is omitted when CPU or NIC capacity cannot be measured or fl
 incomplete, rather than reporting an unsafe partial value. Component metrics that remain valid
 continue to be exported. Kubernetes resource attributes include the Pod, namespace, node, and
 instance identity when their Downward API environment variables are present.
+
+Cloud VirtIO drivers often expose byte counters but report an unknown link speed. Set the provider's
+documented per-interface limit in that environment:
+
+```yaml
+resources:
+  network_capacity_mbps: 2000
+```
+
+The override is deliberately explicit: inferring capacity from observed traffic would understate
+headroom before the interface has ever reached its limit.
 
 Treat this as a candidate autoscaling signal until the chosen metrics adapter, per-Pod aggregation,
 and upstream traffic redistribution have been validated for the deployment. Kubernetes normally

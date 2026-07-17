@@ -57,10 +57,10 @@ pub struct ResourceSampler {
 
 impl ResourceSampler {
     #[must_use]
-    pub fn new(attached_interfaces: Vec<String>) -> Self {
+    pub fn new(attached_interfaces: Vec<String>, network_capacity_mbps: Option<u64>) -> Self {
         Self {
             cpu: CpuSampler::new(),
-            network: NetworkSampler::new(attached_interfaces),
+            network: NetworkSampler::new(attached_interfaces, network_capacity_mbps),
         }
     }
 

@@ -110,6 +110,11 @@ config:
     address: 127.0.0.1
     port: 9090
 
+  resources:
+    # Optional per-interface capacity override for cloud/virtual NICs whose
+    # drivers report an unknown link speed. Physical NICs are auto-detected.
+    network_capacity_mbps: null
+
   # OpenTelemetry configuration
   otel:
     enabled: false

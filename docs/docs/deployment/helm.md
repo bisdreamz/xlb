@@ -15,6 +15,7 @@ helm install xlb ./helm/xlb -n xlb --create-namespace
 ```
 
 From custom values:
+
 ```bash
 helm install xlb ./helm/xlb -f custom-values.yaml -n xlb --create-namespace
 ```
@@ -27,8 +28,8 @@ helm install xlb ./helm/xlb -f custom-values.yaml -n xlb --create-namespace
 image:
   repository: emaczura/xlb
   pullPolicy: IfNotPresent
-  tag: ""       # Defaults to Chart.appVersion
-  digest: ""    # Prefer an immutable sha256:... digest in production
+  tag: "" # Defaults to Chart.appVersion
+  digest: "" # Prefer an immutable sha256:... digest in production
 
 imagePullSecrets: []
 ```
@@ -38,9 +39,9 @@ When `digest` is set, the chart deploys `repository@digest` and ignores `tag`.
 ### Deployment Configuration
 
 ```yaml
-replicaCount: 2  # Number of XLB instances
+replicaCount: 2 # Number of XLB instances
 
-terminationGracePeriodSeconds: 90  # Must be > shutdown_timeout
+terminationGracePeriodSeconds: 90 # Must be > shutdown_timeout
 ```
 
 ### Service Account
@@ -49,7 +50,7 @@ terminationGracePeriodSeconds: 90  # Must be > shutdown_timeout
 serviceAccount:
   create: true
   annotations: {}
-  name: ""  # Defaults to release name
+  name: "" # Defaults to release name
 ```
 
 ### Security Context
@@ -58,9 +59,9 @@ serviceAccount:
 securityContext:
   capabilities:
     add:
-      - NET_ADMIN  # Required for XDP
-      - SYS_ADMIN  # Required for eBPF
-      - BPF        # Required for eBPF maps
+      - NET_ADMIN # Required for XDP
+      - SYS_ADMIN # Required for eBPF
+      - BPF # Required for eBPF maps
   privileged: true
 ```
 
@@ -111,7 +112,7 @@ All values under `config` are used to generate `xlb.yaml`:
 
 ```yaml
 config:
-  name: ""  # Optional service name for metrics
+  name: "" # Optional service name for metrics
   listen: auto
   proto: tcp
 
@@ -131,6 +132,10 @@ config:
   admin:
     address: 127.0.0.1
     port: 9090
+
+  # Set this when a cloud/virtual NIC reports an unknown link speed.
+  resources:
+    network_capacity_mbps: null
 
   otel:
     enabled: false
@@ -188,7 +193,7 @@ Kubernetes delays liveness and readiness checks until it succeeds. Set `startupP
 
 ```yaml
 env:
-  RUST_LOG: "info"  # Set to "debug" for verbose logging
+  RUST_LOG: "info" # Set to "debug" for verbose logging
 ```
 
 ## Common Configurations

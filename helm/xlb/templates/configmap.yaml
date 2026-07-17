@@ -36,6 +36,8 @@ data:
     admin:
       address: {{ .Values.config.admin.address | quote }}
       port: {{ .Values.config.admin.port }}
+    resources:
+      network_capacity_mbps: {{ .Values.config.resources.network_capacity_mbps | toJson }}
     {{- if .Values.config.otel.enabled }}
     otel:
       enabled: {{ .Values.config.otel.enabled }}

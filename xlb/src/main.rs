@@ -112,6 +112,7 @@ async fn main() -> anyhow::Result<()> {
         Duration::from_secs(config.orphan_ttl_secs as u64),
         Duration::from_mins(1),
         attached_interfaces,
+        config.resources.network_capacity_mbps,
         status.clone(),
     );
 

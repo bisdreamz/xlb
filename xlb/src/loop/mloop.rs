@@ -109,6 +109,7 @@ impl MaintenanceLoop {
         orphan_ttl: Duration,
         tcp_time_wait_ttl: Duration,
         attached_interfaces: Vec<String>,
+        network_capacity_mbps: Option<u64>,
         status: Arc<StatusState>,
     ) -> Self {
         let MaintenanceMaps {
@@ -127,7 +128,7 @@ impl MaintenanceLoop {
             last_run_ns: 0,
             last_flow_pair_invariants: 0,
             prev_flow_stats: std::collections::HashMap::new(),
-            resource_sampler: ResourceSampler::new(attached_interfaces),
+            resource_sampler: ResourceSampler::new(attached_interfaces, network_capacity_mbps),
             flow_iteration_error_reported: false,
             status,
         }

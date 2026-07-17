@@ -162,13 +162,25 @@ async fn main() -> anyhow::Result<()> {
     tokio::time::sleep(shutdown_timeout.saturating_sub(shutdown_started.elapsed())).await;
 
     info!("Graceful shutdown complete");
-    let maintenance_result = loop_handle.shutdown(Duration::from_secs(1)).await;
-    admin_server
-        .shutdown()
+    let maintenance_result = loop_handle
+        .shutdown(Duration::from_secs(1))
         .await
-        .context("Failed to shutdown admin HTTP server")?;
-    maintenance_result.context("Failed to stop maintenance loop")?;
-    info!("Maintenance loop stopped");
+        .context("Failed to stop maintenance loop");
+    let admin_result = admin_server
+        .shutdown(Duration::from_secs(1))
+        .await
+        .context("Failed to shutdown admin HTTP server");
 
-    shutdown_result
+    if let Err(error) = &maintenance_result {
+        warn!("{error:#}");
+    } else {
+        info!("Maintenance loop stopped");
+    }
+    if let Err(error) = &admin_result {
+        warn!("{error:#}");
+    }
+
+    shutdown_result?;
+    maintenance_result?;
+    admin_result
 }

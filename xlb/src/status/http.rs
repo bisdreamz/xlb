@@ -8,6 +8,7 @@ use axum::{Json, Router};
 use log::info;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
@@ -37,12 +38,26 @@ impl AdminServerHandle {
         }
     }
 
-    pub async fn shutdown(mut self) -> Result<()> {
+    pub async fn shutdown(mut self, timeout: Duration) -> Result<()> {
         let shutdown_requested = self
             .shutdown
             .take()
             .is_some_and(|shutdown| shutdown.send(()).is_ok());
-        self.task.await.context("Admin HTTP server task failed")?;
+        match tokio::time::timeout(timeout, &mut self.task).await {
+            Ok(result) => result.context("Admin HTTP server task failed")?,
+            Err(_) => {
+                self.task.abort();
+                match self.task.await {
+                    Ok(()) => {}
+                    Err(error) if error.is_cancelled() => {}
+                    Err(error) => return Err(error).context("Admin HTTP server task failed"),
+                }
+                return Err(anyhow!(
+                    "Admin HTTP server did not stop within {} ms",
+                    timeout.as_millis()
+                ));
+            }
+        }
 
         let Some(exited) = self.exited.take() else {
             return Ok(());
@@ -250,6 +265,51 @@ mod tests {
             .await
             .expect_err("an unrequested server exit must stop XLB");
         assert!(error.to_string().contains("stopped unexpectedly"));
-        handle.shutdown().await.expect("join server task");
+        handle
+            .shutdown(Duration::from_secs(1))
+            .await
+            .expect("join server task");
+    }
+
+    #[tokio::test]
+    async fn shutdown_aborts_a_server_that_exceeds_its_deadline() {
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let (exit_tx, exit_rx) = oneshot::channel();
+        let task = tokio::spawn(async move {
+            let _shutdown_rx = shutdown_rx;
+            let _exit_tx = exit_tx;
+            std::future::pending::<()>().await;
+        });
+        let handle = AdminServerHandle {
+            shutdown: Some(shutdown_tx),
+            exited: Some(exit_rx),
+            task,
+        };
+
+        let error = handle
+            .shutdown(Duration::from_millis(10))
+            .await
+            .expect_err("a stalled server must not block shutdown indefinitely");
+        assert!(error.to_string().contains("did not stop within 10 ms"));
+    }
+
+    #[tokio::test]
+    async fn requested_shutdown_waits_for_a_successful_server_exit() {
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let (exit_tx, exit_rx) = oneshot::channel();
+        let task = tokio::spawn(async move {
+            shutdown_rx.await.expect("receive shutdown request");
+            let _ = exit_tx.send(Ok(()));
+        });
+        let handle = AdminServerHandle {
+            shutdown: Some(shutdown_tx),
+            exited: Some(exit_rx),
+            task,
+        };
+
+        handle
+            .shutdown(Duration::from_secs(1))
+            .await
+            .expect("requested server shutdown succeeds");
     }
 }

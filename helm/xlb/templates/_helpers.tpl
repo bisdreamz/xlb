@@ -6,6 +6,20 @@ Expand the name of the chart.
 {{- end }}
 
 {{/*
+Address the kubelet can use to reach a host-networked loopback admin listener.
+*/}}
+{{- define "xlb.adminProbeHost" -}}
+{{- $address := toString .Values.config.admin.address -}}
+{{- if eq $address "0.0.0.0" -}}
+127.0.0.1
+{{- else if eq $address "::" -}}
+::1
+{{- else -}}
+{{- $address -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Create a default fully qualified app name.
 */}}
 {{- define "xlb.fullname" -}}

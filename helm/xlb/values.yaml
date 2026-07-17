@@ -104,6 +104,12 @@ config:
   # Graceful shutdown timeout - should match DNS TTL
   shutdown_timeout: 60
 
+  # Local, unauthenticated health and status API. Keep loopback unless access
+  # is protected by the deployment environment.
+  admin:
+    address: 127.0.0.1
+    port: 9090
+
   # OpenTelemetry configuration
   otel:
     enabled: false
@@ -114,29 +120,12 @@ config:
       # Example for authentication:
       # Authorization: "Bearer token"
 
-# Readiness probe configuration
-readinessProbe:
-  exec:
-    command:
-      - sh
-      - -c
-      - "ip link show | grep -q xdp && [ ! -f /tmp/shutdown ]"
-  initialDelaySeconds: 5
-  periodSeconds: 1
-  timeoutSeconds: 3
-  failureThreshold: 3
-
-# Liveness probe configuration
-livenessProbe:
-  exec:
-    command:
-      - sh
-      - -c
-      - "ip link show | grep -q xdp"
-  initialDelaySeconds: 10
-  periodSeconds: 10
-  timeoutSeconds: 5
-  failureThreshold: 3
+# Optional complete probe overrides. When empty, the chart uses `/readyz` and
+# `/healthz` on config.admin with production-safe defaults. The startup probe
+# allows 60 seconds for Kubernetes discovery and XDP attachment.
+startupProbe: {}
+readinessProbe: {}
+livenessProbe: {}
 
 env:
   RUST_LOG: "info"

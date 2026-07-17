@@ -28,6 +28,14 @@ config:
       service: backend-service
 ```
 
+**Health and status:**
+
+- The chart probes `/healthz` and `/readyz` on the local admin listener.
+- A default startup probe protects the initial Kubernetes sync and XDP attachment window.
+- `GET /api/v1/status` provides the versioned operational JSON snapshot.
+- The unauthenticated listener defaults to `127.0.0.1:9090`; keep it on loopback unless access is
+  protected externally.
+
 **ExternalDNS Integration:**
 ```yaml
 service:

@@ -128,6 +128,10 @@ config:
   orphan_ttl_secs: 300
   shutdown_timeout: 60
 
+  admin:
+    address: 127.0.0.1
+    port: 9090
+
   otel:
     enabled: false
     endpoint: "http://opentelemetry-collector:4317"
@@ -140,29 +144,45 @@ See [Configuration Reference](../configuration/reference.md) for detailed field 
 
 ### Health Probes
 
+By default, the chart derives HTTP probes from `config.admin`:
+
 ```yaml
+startupProbe:
+  httpGet:
+    host: 127.0.0.1
+    path: /healthz
+    port: 9090
+    scheme: HTTP
+  periodSeconds: 2
+  timeoutSeconds: 1
+  failureThreshold: 30
+
 readinessProbe:
-  exec:
-    command:
-      - sh
-      - -c
-      - "ip link show | grep -q xdp && [ ! -f /tmp/shutdown ]"
+  httpGet:
+    host: 127.0.0.1
+    path: /readyz
+    port: 9090
+    scheme: HTTP
   initialDelaySeconds: 5
   periodSeconds: 1
-  timeoutSeconds: 3
+  timeoutSeconds: 1
   failureThreshold: 3
 
 livenessProbe:
-  exec:
-    command:
-      - sh
-      - -c
-      - "ip link show | grep -q xdp"
+  httpGet:
+    host: 127.0.0.1
+    path: /healthz
+    port: 9090
+    scheme: HTTP
   initialDelaySeconds: 10
   periodSeconds: 10
-  timeoutSeconds: 5
+  timeoutSeconds: 3
   failureThreshold: 3
 ```
+
+The startup probe allows 60 seconds for the initial Kubernetes discovery sync and XDP attachment;
+Kubernetes delays liveness and readiness checks until it succeeds. Set `startupProbe`,
+`readinessProbe`, or `livenessProbe` to a complete custom probe object to override a default.
 
 ### Environment Variables
 

@@ -49,6 +49,26 @@ a partial backend set. Established flows remain pinned to their selected backend
 The chart grants `services:get` and `endpointslices:get,list,watch` in the configured backend
 namespace. It does not require Pod watch permission.
 
+### Health and Status
+
+The Helm chart configures HTTP probes against XLB's loopback-only admin API:
+
+- A startup probe allows 60 seconds for initial discovery and XDP attachment before liveness and
+  readiness checks begin.
+- `/healthz` is the liveness endpoint.
+- `/readyz` becomes ready only with a healthy provider, a fresh dataplane sample, and at least one
+  routable backend.
+- `/api/v1/status` exposes the versioned operational JSON used by the future admin page.
+
+The admin listener defaults to `127.0.0.1:9090`. Because it is unauthenticated and includes backend
+addresses, do not bind it externally without deployment-level access controls.
+
+EndpointSlice watch errors use the kube runtime's default backoff, and XLB retains its
+last-known-good backend set during a control-plane interruption. Provider health in the initial API
+means the initial sync completed and the watch task remains alive; a retrying task deliberately
+fails open rather than draining every XLB during a Kubernetes API outage. If the task terminates,
+health and readiness fail so Kubernetes can restart XLB.
+
 ### Port Mapping
 
 Configure which ports XLB listens on and forwards to backends:
@@ -99,13 +119,11 @@ terminationGracePeriodSeconds: 90
 ```
 
 **Shutdown flow:**
-1. Kubernetes runs the `preStop` hook, which creates `/tmp/shutdown`.
-2. Kubernetes sends SIGTERM as soon as the hook exits.
-3. A subsequent readiness probe observes `/tmp/shutdown`; endpoint removal then propagates
-   asynchronously and is not guaranteed to complete before SIGTERM handling begins.
-4. XLB sets its eBPF shutdown flag and remains attached for `shutdown_timeout`.
-5. Traffic that actually reaches the XLB during that window receives a reset response.
-6. XLB exits and detaches the program after the timeout.
+1. Kubernetes sends SIGTERM.
+2. XLB immediately marks `/readyz` unavailable so endpoint removal can begin.
+3. XLB sets its eBPF shutdown flag and remains attached for `shutdown_timeout`.
+4. Traffic that actually reaches the XLB during that window receives a reset response.
+5. XLB exits and detaches the program after the timeout.
 
 This mechanism is reactive: XLB does not transmit anything for an idle connection that sends no
 packet during the grace window. `terminationGracePeriodSeconds` must exceed `shutdown_timeout`.
@@ -266,7 +284,7 @@ kubectl logs -n xlb <pod-name> -f
 ```
 
 Expected behavior:
-1. "preStop hook" creates /tmp/shutdown
-2. Readiness probe fails
-3. RST packets sent for `shutdown_timeout`
-4. Pod exits
+1. XLB receives SIGTERM and `/readyz` begins returning `503`.
+2. The eBPF shutdown flag is set.
+3. Matching packets receive RST responses during `shutdown_timeout`.
+4. XLB exits and detaches the program.

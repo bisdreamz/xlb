@@ -69,22 +69,51 @@ spec:
               resource: limits.cpu
               divisor: 1m
 
-        lifecycle:
-          preStop:
-            exec:
-              command:
-              - /bin/sh
-              - -c
-              - touch /tmp/shutdown
-
-        {{- with .Values.livenessProbe }}
-        livenessProbe:
-          {{- toYaml . | nindent 12 }}
+        {{- if .Values.startupProbe }}
+        startupProbe:
+          {{- toYaml .Values.startupProbe | nindent 12 }}
+        {{- else }}
+        startupProbe:
+          httpGet:
+            host: {{ include "xlb.adminProbeHost" . | quote }}
+            path: /healthz
+            port: {{ .Values.config.admin.port }}
+            scheme: HTTP
+          periodSeconds: 2
+          timeoutSeconds: 1
+          failureThreshold: 30
         {{- end }}
 
-        {{- with .Values.readinessProbe }}
+        {{- if .Values.livenessProbe }}
+        livenessProbe:
+          {{- toYaml .Values.livenessProbe | nindent 12 }}
+        {{- else }}
+        livenessProbe:
+          httpGet:
+            host: {{ include "xlb.adminProbeHost" . | quote }}
+            path: /healthz
+            port: {{ .Values.config.admin.port }}
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        {{- end }}
+
+        {{- if .Values.readinessProbe }}
         readinessProbe:
-          {{- toYaml . | nindent 12 }}
+          {{- toYaml .Values.readinessProbe | nindent 12 }}
+        {{- else }}
+        readinessProbe:
+          httpGet:
+            host: {{ include "xlb.adminProbeHost" . | quote }}
+            path: /readyz
+            port: {{ .Values.config.admin.port }}
+            scheme: HTTP
+          initialDelaySeconds: 5
+          periodSeconds: 1
+          timeoutSeconds: 1
+          failureThreshold: 3
         {{- end }}
 
         resources:

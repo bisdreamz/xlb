@@ -262,7 +262,10 @@ fn text_response(status: StatusCode, body: &'static str) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::status::{PortStatus, ProviderKind, ReadinessReason, StatusMetadata, StatusState};
+    use crate::status::{
+        PortStatus, ProviderKind, ReadinessReason, StatusMetadata, StatusState, XdpAttachment,
+        XdpAttachmentMode,
+    };
     use axum::body::{Body, to_bytes};
     use axum::http::Request;
     use tower::ServiceExt;
@@ -273,7 +276,10 @@ mod tests {
             provider: ProviderKind::Static,
             listen_address: "192.0.2.1".parse().expect("valid IP"),
             listen_interface: "eth0".into(),
-            attached_interfaces: vec!["eth0".into()],
+            xdp_attachments: vec![XdpAttachment {
+                interface: "eth0".into(),
+                mode: XdpAttachmentMode::Native,
+            }],
             protocol: xlb_common::net::Proto::Tcp,
             routing_mode: xlb_common::config::routing::RoutingMode::Nat,
             ports: vec![PortStatus {
@@ -331,6 +337,11 @@ mod tests {
         assert_eq!(value["readiness"]["reason"], "starting");
         assert_eq!(value["dataplane"]["protocol"], "tcp");
         assert_eq!(value["dataplane"]["routing_mode"], "nat");
+        assert_eq!(value["dataplane"]["attached_interfaces"][0], "eth0");
+        assert_eq!(
+            value["dataplane"]["xdp_attachments"][0],
+            serde_json::json!({ "interface": "eth0", "mode": "native" })
+        );
         assert_eq!(
             ReadinessReason::Starting.as_str(),
             value["readiness"]["reason"]

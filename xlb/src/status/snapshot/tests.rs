@@ -8,7 +8,10 @@ fn metadata() -> StatusMetadata {
         provider: ProviderKind::Kubernetes,
         listen_address: "192.0.2.10".parse().expect("valid IP"),
         listen_interface: "eth0".into(),
-        attached_interfaces: vec!["eth0".into()],
+        xdp_attachments: vec![XdpAttachment {
+            interface: "eth0".into(),
+            mode: XdpAttachmentMode::Native,
+        }],
         protocol: xlb_common::net::Proto::Tcp,
         routing_mode: xlb_common::config::routing::RoutingMode::Nat,
         ports: vec![PortStatus {

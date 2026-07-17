@@ -17,6 +17,24 @@ const sourceLabel = computed(
       demo: 'Demo data',
     })[status.source.value],
 )
+const xdpModeLabel = computed(() => {
+  const dataplane = snapshot.value.dataplane
+  const attachments = dataplane.xdp_attachments ?? []
+  if (attachments.length === 0) {
+    if (dataplane.attached_interfaces.length > 0) {
+      return `Mode not reported · ${dataplane.attached_interfaces.join(', ')}`
+    }
+    return status.source.value === 'live' || status.source.value === 'stale' ? 'Not attached' : 'Unavailable'
+  }
+
+  const modeName = (mode: (typeof attachments)[number]['mode']) =>
+    mode === 'native' ? 'Native driver' : 'Generic (SKB fallback)'
+  const modes = new Set(attachments.map((attachment) => attachment.mode))
+  if (modes.size === 1) {
+    return `${modeName(attachments[0].mode)} · ${attachments.map(({ interface: name }) => name).join(', ')}`
+  }
+  return attachments.map((attachment) => `${attachment.interface}: ${modeName(attachment.mode)}`).join(' · ')
+})
 
 const resourceSeries = computed(() => [
   { name: 'Network', color: '#ef4b23', values: status.history.networkPercent },
@@ -97,7 +115,7 @@ const resourceSeries = computed(() => [
         </div>
         <div>
           <dt>XDP attachment mode</dt>
-          <dd><span class="planned-badge">Coming soon</span></dd>
+          <dd>{{ xdpModeLabel }}</dd>
         </div>
         <div>
           <dt>Status schema</dt>

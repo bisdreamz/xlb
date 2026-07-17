@@ -243,7 +243,13 @@ impl StatusState {
             dataplane: DataplaneStatus {
                 listen_address: self.metadata.listen_address,
                 listen_interface: self.metadata.listen_interface.clone(),
-                attached_interfaces: self.metadata.attached_interfaces.clone(),
+                attached_interfaces: self
+                    .metadata
+                    .xdp_attachments
+                    .iter()
+                    .map(|attachment| attachment.interface.clone())
+                    .collect(),
+                xdp_attachments: self.metadata.xdp_attachments.clone(),
                 protocol: self.metadata.protocol,
                 routing_mode: self.metadata.routing_mode,
                 ports: self.metadata.ports.clone(),

@@ -39,11 +39,6 @@ const sortAria = (key: BackendSortKey) =>
               Backend <i>{{ sortMark('name') }}</i>
             </button>
           </th>
-          <th>
-            <button type="button" disabled title="Backend placement coming soon">
-              Placement <small>Coming soon</small>
-            </button>
-          </th>
           <th :aria-sort="sortAria('state')">
             <button type="button" @click="$emit('sort', 'state')">
               State <i>{{ sortMark('state') }}</i>
@@ -69,11 +64,6 @@ const sortAria = (key: BackendSortKey) =>
               Egress <i>{{ sortMark('egressMbps') }}</i>
             </button>
           </th>
-          <th class="numeric proposed-column">
-            <button type="button" disabled title="Passive backend latency coming soon">
-              Latency p95 <small>Coming soon</small>
-            </button>
-          </th>
           <th class="numeric" :aria-sort="sortAria('orphanedPerSecond')">
             <button
               type="button"
@@ -93,7 +83,7 @@ const sortAria = (key: BackendSortKey) =>
           :class="{ selected: backend.id === selectedId, warning: backend.orphanedPerSecond >= 1 }"
           @click="$emit('select', backend)"
         >
-          <td>
+          <td data-label="Backend">
             <div class="backend-identity">
               <span class="state-square" :class="`state-square--${backend.state}`"></span>
               <div>
@@ -102,19 +92,29 @@ const sortAria = (key: BackendSortKey) =>
               </div>
             </div>
           </td>
-          <td aria-label="Placement coming soon">—</td>
-          <td>
+          <td data-label="State">
             <span class="state-label" :class="`state-label--${backend.state}`">{{ backend.state }}</span>
           </td>
-          <td class="numeric emphasis">{{ integer.format(backend.activeConnections) }}</td>
-          <td class="numeric">{{ integer.format(backend.newConnectionsPerSecond) }}</td>
-          <td class="numeric">{{ integer.format(backend.ingressMbps) }} <small>Mbps</small></td>
-          <td class="numeric">{{ integer.format(backend.egressMbps) }} <small>Mbps</small></td>
-          <td class="numeric proposed-column" aria-label="Latency coming soon">—</td>
-          <td class="numeric" :class="{ danger: backend.orphanedPerSecond >= 1 }">
+          <td class="numeric emphasis" data-label="Active">
+            {{ integer.format(backend.activeConnections) }}
+          </td>
+          <td class="numeric" data-label="New / sec">
+            {{ integer.format(backend.newConnectionsPerSecond) }}
+          </td>
+          <td class="numeric" data-label="Ingress">
+            {{ integer.format(backend.ingressMbps) }} <small>Mbps</small>
+          </td>
+          <td class="numeric" data-label="Egress">
+            {{ integer.format(backend.egressMbps) }} <small>Mbps</small>
+          </td>
+          <td
+            class="numeric"
+            data-label="Idle removed / sec"
+            :class="{ danger: backend.orphanedPerSecond >= 1 }"
+          >
             {{ backend.orphanedPerSecond.toFixed(1) }}
           </td>
-          <td class="row-action">
+          <td class="row-action" data-label="Details">
             <button
               type="button"
               :aria-label="`Open details for ${backend.name}`"

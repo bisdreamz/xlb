@@ -12,10 +12,23 @@ pub struct StatusMetadata {
     pub provider: ProviderKind,
     pub listen_address: IpAddr,
     pub listen_interface: String,
-    pub attached_interfaces: Vec<String>,
+    pub xdp_attachments: Vec<XdpAttachment>,
     pub protocol: Proto,
     pub routing_mode: RoutingMode,
     pub ports: Vec<PortStatus>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum XdpAttachmentMode {
+    Native,
+    Generic,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct XdpAttachment {
+    pub interface: String,
+    pub mode: XdpAttachmentMode,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -166,6 +179,7 @@ pub struct DataplaneStatus {
     pub listen_address: IpAddr,
     pub listen_interface: String,
     pub attached_interfaces: Vec<String>,
+    pub xdp_attachments: Vec<XdpAttachment>,
     pub protocol: Proto,
     pub routing_mode: RoutingMode,
     pub ports: Vec<PortStatus>,

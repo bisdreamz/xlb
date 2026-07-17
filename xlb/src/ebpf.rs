@@ -1,4 +1,5 @@
 use crate::config::XlbConfig;
+use crate::status::{XdpAttachment, XdpAttachmentMode};
 use crate::system::ListenIface;
 use anyhow::{Result, anyhow};
 use aya::maps::Array;
@@ -11,7 +12,7 @@ use xlb_common::types::PortMapping;
 
 pub struct LoadedEbpf {
     pub ebpf: Ebpf,
-    pub attached_interfaces: Vec<String>,
+    pub attachments: Vec<XdpAttachment>,
 }
 
 pub fn to_ebpf_config(cfg: &XlbConfig, iface: &ListenIface) -> EbpfConfig {
@@ -80,7 +81,7 @@ pub fn load_ebpf_program(config: &XlbConfig, iface: &ListenIface) -> Result<Load
     let skip_prefixes = ["lo", "cilium", "lxc", "anchor", "cpbridge"];
     let skip_bridges = ["docker0", "virbr"];
 
-    let mut attached_interfaces = Vec::new();
+    let mut attachments = Vec::new();
     for interface in interfaces {
         // Skip loopback and bridge interfaces
         if skip_prefixes
@@ -98,21 +99,29 @@ pub fn load_ebpf_program(config: &XlbConfig, iface: &ListenIface) -> Result<Load
         }
 
         // Try native XDP first, then generic SKB mode.
-        let attach_result =
-            program
-                .attach(&interface.name, XdpMode::Driver)
-                .or_else(|driver_error| {
-                    warn!(
-                        "Native XDP attach failed for {}: {}; retrying in SKB mode",
-                        interface.name, driver_error
-                    );
-                    program.attach(&interface.name, XdpMode::Skb)
-                });
+        let attach_result = program
+            .attach(&interface.name, XdpMode::Driver)
+            .map(|link_id| (link_id, XdpAttachmentMode::Native))
+            .or_else(|driver_error| {
+                warn!(
+                    "Native XDP attach failed for {}: {}; retrying in SKB mode",
+                    interface.name, driver_error
+                );
+                program
+                    .attach(&interface.name, XdpMode::Skb)
+                    .map(|link_id| (link_id, XdpAttachmentMode::Generic))
+            });
 
         match attach_result {
-            Ok(_) => {
-                info!("XDP ATTACHED successfully to interface: {}", interface.name);
-                attached_interfaces.push(interface.name);
+            Ok((_, mode)) => {
+                info!(
+                    "XDP attached successfully: interface={} mode={:?}",
+                    interface.name, mode
+                );
+                attachments.push(XdpAttachment {
+                    interface: interface.name,
+                    mode,
+                });
             }
             Err(e) => {
                 warn!(
@@ -123,8 +132,5 @@ pub fn load_ebpf_program(config: &XlbConfig, iface: &ListenIface) -> Result<Load
         }
     }
 
-    Ok(LoadedEbpf {
-        ebpf,
-        attached_interfaces,
-    })
+    Ok(LoadedEbpf { ebpf, attachments })
 }

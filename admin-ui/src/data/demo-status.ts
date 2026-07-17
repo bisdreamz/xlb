@@ -21,6 +21,7 @@ export const demoStatus: StatusSnapshot = {
     listen_address: '10.18.0.23',
     listen_interface: 'eth0',
     attached_interfaces: ['eth0'],
+    xdp_attachments: [{ interface: 'eth0', mode: 'native' }],
     protocol: 'tcp',
     routing_mode: 'nat',
     ports: [{ listen: 80, backend: 8080 }],

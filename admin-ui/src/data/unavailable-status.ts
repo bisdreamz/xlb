@@ -25,6 +25,7 @@ export const unavailableStatus: StatusSnapshot = {
     listen_address: 'Unavailable',
     listen_interface: 'Unavailable',
     attached_interfaces: [],
+    xdp_attachments: [],
     protocol: 'Unavailable',
     routing_mode: 'Unavailable',
     ports: [],

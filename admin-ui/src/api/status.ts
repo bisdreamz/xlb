@@ -1,5 +1,6 @@
 export type Lifecycle = 'starting' | 'running' | 'shutting_down'
 export type ProviderKind = 'static' | 'kubernetes'
+export type XdpAttachmentMode = 'native' | 'generic'
 
 export interface HealthStatus {
   healthy: boolean
@@ -68,6 +69,7 @@ export interface StatusSnapshot {
     listen_address: string
     listen_interface: string
     attached_interfaces: string[]
+    xdp_attachments?: Array<{ interface: string; mode: XdpAttachmentMode }>
     protocol: string
     routing_mode: string
     ports: Array<{ listen: number; backend: number }>

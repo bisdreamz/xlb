@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import ComingSoon from '../components/ComingSoon.vue'
+import HelpTip from '../components/HelpTip.vue'
 import MetricCard from '../components/MetricCard.vue'
 import UPlotChart from '../components/UPlotChart.vue'
 import { useStatusStore } from '../stores/status'
@@ -21,6 +22,19 @@ const capacityHeadroom = computed(() => {
   const overall = percent(snapshot.value.resources.overall_percent)
   return overall === null ? null : 100 - overall
 })
+const missingCapacitySignals = computed(() => {
+  const resources = snapshot.value.resources
+  return [
+    resources.cpu_percent === null ? 'CPU pressure' : null,
+    resources.network_percent === null ? 'NIC capacity' : null,
+    resources.flow_map_percent === null ? 'flow-map pressure' : null,
+  ].filter((signal): signal is string => signal !== null)
+})
+const missingCapacityLabel = computed(() =>
+  missingCapacitySignals.value.length === 0
+    ? 'Composite resource signal unavailable'
+    : `Missing ${missingCapacitySignals.value.join(', ')}`,
+)
 const sourceLabel = computed(
   () =>
     ({
@@ -153,7 +167,7 @@ const draining = computed(() =>
       :value="percentLabel(snapshot.resources.overall_percent)"
       :detail="
         snapshot.resources.overall_percent === null
-          ? 'One or more capacity signals are unavailable'
+          ? missingCapacityLabel
           : 'Highest CPU, network, or flow-map signal'
       "
       tone="lime"
@@ -190,14 +204,31 @@ const draining = computed(() =>
           <p>The highest complete signal determines overall utilization.</p>
         </div>
       </header>
-      <div class="resource-score">
-        <strong>{{ percent(snapshot.resources.overall_percent) ?? '—' }}</strong
-        ><span v-if="snapshot.resources.overall_percent !== null">%</span><small>Overall</small>
+      <div
+        class="resource-score"
+        :class="{ 'resource-score--unavailable': snapshot.resources.overall_percent === null }"
+      >
+        <template v-if="snapshot.resources.overall_percent !== null">
+          <strong>{{ percent(snapshot.resources.overall_percent) }}</strong
+          ><span>%</span>
+        </template>
+        <strong v-else>Not available</strong>
+        <small>Overall</small>
       </div>
       <div class="resource-bars">
         <div>
           <span
-            ><b>Network</b><small>{{ percentLabel(snapshot.resources.network_percent) }}</small></span
+            ><b
+              >Network
+              <HelpTip
+                v-if="snapshot.resources.network_percent === null"
+                explanation="This host does not report NIC line rate, so XLB cannot calculate a network-capacity percentage. Traffic rates remain available."
+              /> </b
+            ><small>{{
+              snapshot.resources.network_percent === null
+                ? 'Capacity unknown'
+                : percentLabel(snapshot.resources.network_percent)
+            }}</small></span
           ><i><em :style="{ width: barWidth(snapshot.resources.network_percent) }"></em></i>
         </div>
         <div>
@@ -221,7 +252,7 @@ const draining = computed(() =>
         ><strong>{{ capacityHeadroom === null ? '—' : `${capacityHeadroom}%` }}</strong
         ><small>{{
           capacityHeadroom === null
-            ? 'Unavailable until every capacity signal is reported'
+            ? `${missingCapacityLabel}; reported signals remain visible above`
             : 'Composite signal available for autoscaling'
         }}</small>
       </div>

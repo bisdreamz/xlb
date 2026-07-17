@@ -63,8 +63,12 @@ async fn main() -> anyhow::Result<()> {
 
     let ebpf::LoadedEbpf {
         mut ebpf,
-        attached_interfaces,
+        attachments,
     } = ebpf::load_ebpf_program(&config, &iface).context("Failed to load eBPF program")?;
+    let attached_interfaces = attachments
+        .iter()
+        .map(|attachment| attachment.interface.clone())
+        .collect::<Vec<_>>();
 
     let ebpf_backends: Array<_, Backend> = ebpf
         .take_map("BACKENDS")
@@ -84,7 +88,7 @@ async fn main() -> anyhow::Result<()> {
         provider: provider_kind,
         listen_address: iface.ip,
         listen_interface: iface.name.clone(),
-        attached_interfaces: attached_interfaces.clone(),
+        xdp_attachments: attachments,
         protocol: config.proto,
         routing_mode: config.mode,
         ports: config

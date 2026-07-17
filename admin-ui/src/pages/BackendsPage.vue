@@ -137,23 +137,25 @@ watch(selectedId, (backend) => {
     </div>
   </section>
 
-  <section class="backend-distribution page-shell" aria-label="Backend distribution summary">
-    <article>
-      <span>Connection spread</span><strong>{{ distribution.spread.toFixed(1) }}%</strong
-      ><small>Difference between busiest and least busy accepting backend</small>
-    </article>
-    <article>
-      <span>Available with no new traffic</span><strong>{{ distribution.zero }}</strong
-      ><small>Potential discovery or routing imbalance</small>
-    </article>
-    <article>
-      <span>Needs attention</span><strong>{{ stateCounts.attention }}</strong
-      ><small>Idle-timeout threshold crossed</small>
-    </article>
-    <p>
-      Distribution and attention summaries are calculated in this browser from the current per-backend status
-      snapshot.
-    </p>
+  <section class="page-shell" aria-label="Backend distribution summary">
+    <div class="backend-distribution">
+      <article>
+        <span>Connection spread</span><strong>{{ distribution.spread.toFixed(1) }}%</strong
+        ><small>Difference between busiest and least busy accepting backend</small>
+      </article>
+      <article>
+        <span>Available with no new traffic</span><strong>{{ distribution.zero }}</strong
+        ><small>Potential discovery or routing imbalance</small>
+      </article>
+      <article>
+        <span>Needs attention</span><strong>{{ stateCounts.attention }}</strong
+        ><small>Idle-timeout threshold crossed</small>
+      </article>
+      <p>
+        Distribution and attention summaries are calculated in this browser from the current per-backend
+        status snapshot.
+      </p>
+    </div>
   </section>
 
   <section class="backend-section backend-section--route page-shell">

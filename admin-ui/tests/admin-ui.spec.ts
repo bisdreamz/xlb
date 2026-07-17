@@ -48,8 +48,6 @@ test('backend pool supports pagination, filtering, sorting, and drill-down', asy
     .getByRole('button', { name: /Backend/ })
     .click()
   await expect(page.locator('tbody tr').first()).toContainText('bidder-api-7f8797d8f4-x3j5k')
-  await expect(page.getByRole('button', { name: /Placement.*Coming soon/ })).toBeDisabled()
-  await expect(page.locator('tbody tr td:nth-child(2)').first()).toHaveText('—')
   await page.locator('tbody tr').first().click()
   const drawer = page.getByRole('dialog')
   await expect(drawer).toBeVisible()
@@ -104,7 +102,12 @@ test('missing resource signals remain unavailable rather than becoming zero', as
   await page.goto('./')
   const resourceCard = page.locator('.metric-card').filter({ hasText: 'Resource pressure' })
   await expect(resourceCard.getByText('Unavailable', { exact: true })).toBeVisible()
-  await expect(page.getByText('Unavailable until every capacity signal is reported')).toBeVisible()
+  await expect(page.locator('.resource-score').getByText('Not available', { exact: true })).toBeVisible()
+  await expect(page.getByRole('note', { name: /does not report NIC line rate/ })).toBeVisible()
+  await expect(
+    resourceCard.getByText('Missing CPU pressure, NIC capacity, flow-map pressure', { exact: true }),
+  ).toBeVisible()
+  await expect(page.getByText('Capacity unknown', { exact: true })).toBeVisible()
   await expect(page.getByText('Capacity headroom').locator('..').getByText('—')).toBeVisible()
 
   await page.getByRole('link', { name: /^Diagnostics/ }).click()
@@ -147,6 +150,69 @@ test('connection lifecycle disables unavailable close attribution', async ({ pag
   await expect(page.getByText('Opened and closed volume share one scale.')).toBeVisible()
   await expect(page.getByRole('button', { name: /Close breakdown.*Coming soon/ })).toBeDisabled()
   await expect(page.getByText('Client ended connection')).toHaveCount(0)
+
+  const plot = page.locator('.connection-panel .u-over')
+  const bounds = await plot.boundingBox()
+  expect(bounds).not.toBeNull()
+  await plot.hover({ position: { x: bounds!.width / 2, y: bounds!.height / 2 } })
+  const tooltip = page.locator('.connection-panel .uplot-chart__tooltip')
+  await expect(tooltip).toBeVisible()
+  await expect(tooltip.getByText('Opened', { exact: true })).toBeVisible()
+  await expect(tooltip.getByText('Closed', { exact: true })).toBeVisible()
+  await page.waitForRequest('**/api/v1/status')
+  await expect(tooltip).toBeVisible()
+})
+
+test('backend summaries and table remain responsive without losing mobile data', async ({ page }) => {
+  for (const width of [1_024, 820, 390]) {
+    await page.setViewportSize({ width, height: 844 })
+    await page.goto('./backends')
+
+    const distribution = page.locator('.backend-distribution')
+    const table = page.locator('.backend-table-wrap')
+    const [distributionBounds, tableBounds] = await Promise.all([
+      distribution.boundingBox(),
+      table.boundingBox(),
+    ])
+    expect(distributionBounds).not.toBeNull()
+    expect(tableBounds).not.toBeNull()
+    expect(Math.abs(distributionBounds!.x - tableBounds!.x)).toBeLessThanOrEqual(1)
+    expect(Math.abs(distributionBounds!.width - tableBounds!.width)).toBeLessThanOrEqual(1)
+    await expect(table).toHaveCSS('overflow-x', 'clip')
+    await expect
+      .poll(() => table.evaluate((element) => element.scrollWidth - element.clientWidth))
+      .toBeLessThanOrEqual(1)
+    await expect
+      .poll(() =>
+        page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth),
+      )
+      .toBeLessThanOrEqual(1)
+  }
+
+  const firstBackend = page.locator('.backend-table tbody tr').first()
+  await expect(firstBackend.locator('td[data-label="Ingress"]')).toBeVisible()
+  await expect(firstBackend.locator('td[data-label="Egress"]')).toBeVisible()
+  await expect(firstBackend.locator('td[data-label="Idle removed / sec"]')).toBeVisible()
+})
+
+test('diagnostics reports the actual XDP attachment mode', async ({ page }) => {
+  await page.goto('./diagnostics')
+  const dataplane = page.locator('.runtime-card--dark')
+  await expect(dataplane.getByText('Native driver · eth0', { exact: true })).toBeVisible()
+  await expect(dataplane.getByText('XDP attachment mode', { exact: true })).toBeVisible()
+})
+
+test('diagnostics tolerates status payloads from before attachment modes were reported', async ({ page }) => {
+  await page.unroute('**/api/v1/status')
+  await page.route('**/api/v1/status', (route) => {
+    const dataplane = { ...demoStatus.dataplane, xdp_attachments: undefined }
+    return route.fulfill({
+      json: { ...demoStatus, dataplane, sampled_at_unix_ms: Date.now(), sample_age_ms: 0 },
+    })
+  })
+
+  await page.goto('./diagnostics')
+  await expect(page.getByText('Mode not reported · eth0', { exact: true })).toBeVisible()
 })
 
 test('mobile layout retains every route and avoids horizontal page overflow', async ({ page }) => {

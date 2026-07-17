@@ -107,10 +107,7 @@ test('unfinished features remain empty and explicit in demo mode', async ({ page
   await expect(page.getByText('Backend discovery synchronized')).toHaveCount(0)
 
   await page.goto('./backends')
-  await expect(page.getByRole('button', { name: /Placement.*Coming soon/ })).toBeDisabled()
-  await expect(page.getByRole('button', { name: /Latency p95.*Coming soon/ })).toBeDisabled()
   await expect(page.getByText(/worker-nyc2|nyc2-[abc]/)).toHaveCount(0)
-  await expect(page.locator('tbody tr td:nth-child(2)').first()).toHaveText('—')
   await page.locator('tbody tr').first().click()
   const drawer = page.getByRole('dialog')
   await expect(drawer).toBeVisible()

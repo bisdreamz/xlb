@@ -3,7 +3,7 @@ use config::Config;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 use xlb_common::config::routing::RoutingMode;
 use xlb_common::net::Proto;
@@ -72,6 +72,40 @@ const fn default_otel_export_interval() -> u64 {
     10
 }
 
+/// Local listener for health, readiness, and administrative status.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct AdminConfig {
+    /// Address on which the unauthenticated admin API listens.
+    #[serde(default = "default_admin_address")]
+    pub address: IpAddr,
+    /// TCP port on which the admin API listens.
+    #[serde(default = "default_admin_port")]
+    pub port: u16,
+}
+
+impl Default for AdminConfig {
+    fn default() -> Self {
+        Self {
+            address: default_admin_address(),
+            port: default_admin_port(),
+        }
+    }
+}
+
+impl AdminConfig {
+    pub fn socket_addr(&self) -> SocketAddr {
+        SocketAddr::new(self.address, self.port)
+    }
+}
+
+const fn default_admin_address() -> IpAddr {
+    IpAddr::V4(Ipv4Addr::LOCALHOST)
+}
+
+const fn default_admin_port() -> u16 {
+    9090
+}
+
 /// The user facing application config
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
@@ -112,6 +146,9 @@ pub struct XlbConfig {
     /// Optional OpenTelemetry metrics configuration
     #[serde(default)]
     pub otel: Option<OtelConfig>,
+    /// Local health, readiness, and administrative status API.
+    #[serde(default)]
+    pub admin: AdminConfig,
 }
 
 pub const MIN_ORPHAN_TTL_SECS: u32 = 5 * 60;
@@ -141,6 +178,10 @@ impl XlbConfig {
     }
 
     fn validate_supported(&self) -> Result<()> {
+        if self.admin.port == 0 {
+            bail!("Admin API port must be between 1 and 65535");
+        }
+
         if self.proto != Proto::Tcp {
             bail!("Unsupported protocol 'udp': XLB currently supports only IPv4/TCP");
         }
@@ -280,6 +321,28 @@ shutdown_timeout: 15
             .expect("config without orphan TTL must load");
 
         assert_eq!(config.orphan_ttl_secs, MIN_ORPHAN_TTL_SECS);
+    }
+
+    #[test]
+    fn load_defaults_admin_api_to_localhost() {
+        let config =
+            load_test_config("default-admin", MINIMAL_CONFIG).expect("minimal config must load");
+
+        assert_eq!(config.admin.address, IpAddr::V4(Ipv4Addr::LOCALHOST));
+        assert_eq!(config.admin.port, 9090);
+        assert_eq!(
+            config.admin.socket_addr(),
+            "127.0.0.1:9090".parse().expect("valid socket address")
+        );
+    }
+
+    #[test]
+    fn load_rejects_zero_admin_port() {
+        let yaml = format!("{MINIMAL_CONFIG}\nadmin:\n  port: 0\n");
+        let error = load_test_config("zero-admin-port", &yaml)
+            .expect_err("port zero would make the advertised endpoint unstable");
+
+        assert!(error.to_string().contains("Admin API port"));
     }
 
     #[test]

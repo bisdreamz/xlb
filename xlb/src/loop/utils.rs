@@ -24,6 +24,8 @@ pub struct LbFlowStats {
     pub flow_map_complete: bool,
     /// CPU, network, flow-map, and combined resource pressure.
     pub resource_utilization: ResourceUtilization,
+    /// Elapsed time represented by interval counters and byte deltas.
+    pub sample_duration_seconds: f64,
 }
 
 impl AggregateFlowStats {
@@ -163,6 +165,7 @@ pub fn aggregate_flow_stats(
             flow_map_entries,
             flow_map_complete: true,
             resource_utilization: ResourceUtilization::default(),
+            sample_duration_seconds: delta_secs,
         },
         new_prev_flow_stats,
     )

@@ -632,14 +632,19 @@ page. It should be useful without creating a second frontend application or
 Node build pipeline. Embed static HTML/CSS and minimal JavaScript in the Rust
 binary.
 
+Deliver this as two reviewable branches. `status-health-api` establishes the
+snapshot, listener, JSON, health/readiness semantics, and Helm probes.
+`admin-status-ui` later adds the human-readable page without changing how
+dataplane state is sampled.
+
 Initial endpoints:
 
 ```text
-GET /                  Human-readable auto-refreshing status page
 GET /api/v1/status     Versioned JSON status snapshot
 GET /healthz           Liveness: process/event loop is alive
 GET /readyz            Readiness: config loaded, XDP attached, provider synced,
                        and at least one backend eligible
+GET /                  Future human-readable auto-refreshing status page
 ```
 
 Semantics:
@@ -654,21 +659,34 @@ Semantics:
 - A future `xlb status` CLI should consume the same JSON endpoint rather than
   implement separate map inspection.
 
-Status snapshot/page content:
+The initial v1 snapshot includes:
 
-- Build version/commit, uptime, shutdown state.
-- Listen address, protocol, routing mode, port mappings.
-- Attached interfaces and actual native/driver versus generic/SKB mode.
-- Flow-map entries, estimated complete connections, capacity percentage, and
-  insertion/invariant errors.
-- Current/new/closed/orphan flows and closure reason/side.
-- Per-backend eligibility, Kubernetes conditions, custom-health state, route
-  resolution, active flows, clients, ingress/egress PPS, Mbps, and bytes.
-- Active health-check duration and passive TCP handshake latency.
-- Provider watcher synchronized/alive state, last successful update, and last
-  error.
-- Recent high-value warnings such as no backend, SKB fallback, map pressure, or
-  repeated pair-invariant failures.
+- Schema and build version, service name, uptime, and lifecycle state.
+- Health/readiness with stable machine-readable reasons.
+- Listen address/interface, protocol, routing mode, attached interfaces, port
+  mappings, directional flow-map occupancy, and iteration completeness.
+- Provider kind/health plus discovered and routable backend counts.
+- Current and cumulative connection/open/close/orphan values.
+- Ingress/egress PPS, Mbps, byte rates, and cumulative bytes.
+- Per-backend discovery/new-connection availability, connections, clients, and
+  traffic; removed backends remain visible while established flows exist.
+- CPU, network, flow-map, and composite resource utilization.
+
+Later branches may add actual native/generic XDP mode, Kubernetes condition
+details, active-check state, passive latency, invariant totals, and recent
+warnings without making HTTP requests inspect BPF maps directly.
+
+Review follow-ups for later, evidence-driven hardening:
+
+- Benchmark snapshot publication and JSON cloning under pathological backend
+  churn before adding lock-free swaps, pagination, or more caching.
+- Bound graceful HTTP-server shutdown so a pathological slow local client
+  cannot extend process termination indefinitely.
+- Define explicit first-sample rate/baseline semantics instead of using host
+  monotonic uptime when `last_run_ns` is initially zero.
+- Add multi-publish tests for cumulative backend totals across prune and
+  reappearance transitions.
+- Add authentication and request limits before supporting remote admin access.
 
 Security/deployment:
 
@@ -925,9 +943,10 @@ next branch. Do not mix opportunistic cleanup into a TCP correctness branch.
 | 15 | `rust-tooling-cleanup-07-2026` | Userspace Clippy baseline, stable rustfmt configuration, and test-runner documentation | Implemented and independently reviewed |
 | 16 | `xlb-resource-utilization` | Host/process CPU, attached-NIC bandwidth, flow-map pressure, and maximum utilization metric | Implemented and independently reviewed |
 | 17 | `endpoint-slice-discovery` | XLB EndpointSlice merge, strict eligibility, relist behavior, and RBAC | Implemented and independently reviewed |
-| 18 | `status-health-api` | `StatusSnapshot`, `/healthz`, `/readyz`, JSON and mini status page | Planned |
-| 19 | `backend-health-checks` | Static checks and optional Kubernetes secondary checks | Planned |
-| 20 | `observability-packaging` | Latency, Collector, Prometheus, Grafana, and alerts | Planned |
+| 18 | `status-health-api` | `StatusSnapshot`, `/healthz`, `/readyz`, and versioned JSON | Implemented and independently reviewed |
+| 19 | `admin-status-ui` | Read-only per-instance page backed by the status API | Planned |
+| 20 | `backend-health-checks` | Static checks and optional Kubernetes secondary checks | Planned |
+| 21 | `observability-packaging` | Latency, Collector, Prometheus, Grafana, and alerts | Planned |
 
 After those correctness/product branches, run the benchmark matrix before
 optimizing map scans or round-robin selection and before making comparative
@@ -971,9 +990,6 @@ accidental default:
   does not mistake the winner's transient half-pair for corruption.
 - Whether a generation field is worth adding now to reduce userspace cleanup
   races.
-- Management bind/port defaults and authentication scope.
-- Whether zero eligible backends should always fail `/readyz` or be configurable
-  for fail-open environments. Initial recommendation: fail readiness.
 - Health-check schema and whether HTTP(S) support lands with TCP or afterward.
 - Initial passive latency storage: per-flow observation versus per-CPU histogram.
 - Whether strict native-XDP mode is a global config or per-interface policy.

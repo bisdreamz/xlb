@@ -1,40 +1,43 @@
 # XlbConfig
 
-- [1. Property `XlbConfig > listen`](#listen)
-  - [1.1. Property `XlbConfig > listen > oneOf > item 0`](#listen_oneOf_i0)
-  - [1.2. Property `XlbConfig > listen > oneOf > item 1`](#listen_oneOf_i1)
-    - [1.2.1. Property `XlbConfig > listen > oneOf > item 1 > ip`](#listen_oneOf_i1_ip)
-- [2. Property `XlbConfig > mode`](#mode)
-  - [2.1. Property `XlbConfig > mode > oneOf > item 0`](#mode_oneOf_i0)
-  - [2.2. Property `XlbConfig > mode > oneOf > item 1`](#mode_oneOf_i1)
-- [3. Property `XlbConfig > name`](#name)
-- [4. Property `XlbConfig > orphan_ttl_secs`](#orphan_ttl_secs)
-- [5. Property `XlbConfig > otel`](#otel)
-  - [5.1. Property `XlbConfig > otel > anyOf > OtelConfig`](#otel_anyOf_i0)
-    - [5.1.1. Property `XlbConfig > otel > anyOf > item 0 > enabled`](#otel_anyOf_i0_enabled)
-    - [5.1.2. Property `XlbConfig > otel > anyOf > item 0 > endpoint`](#otel_anyOf_i0_endpoint)
-    - [5.1.3. Property `XlbConfig > otel > anyOf > item 0 > export_interval_secs`](#otel_anyOf_i0_export_interval_secs)
-    - [5.1.4. Property `XlbConfig > otel > anyOf > item 0 > headers`](#otel_anyOf_i0_headers)
-      - [5.1.4.1. Property `XlbConfig > otel > anyOf > item 0 > headers > additionalProperties`](#otel_anyOf_i0_headers_additionalProperties)
-    - [5.1.5. Property `XlbConfig > otel > anyOf > item 0 > protocol`](#otel_anyOf_i0_protocol)
-  - [5.2. Property `XlbConfig > otel > anyOf > item 1`](#otel_anyOf_i1)
-- [6. Property `XlbConfig > ports`](#ports)
-  - [6.1. XlbConfig > ports > PortMapping](#ports_items)
-    - [6.1.1. Property `XlbConfig > ports > ports items > local_port`](#ports_items_local_port)
-    - [6.1.2. Property `XlbConfig > ports > ports items > remote_port`](#ports_items_remote_port)
-- [7. Property `XlbConfig > proto`](#proto)
-- [8. Property `XlbConfig > provider`](#provider)
-  - [8.1. Property `XlbConfig > provider > oneOf > item 0`](#provider_oneOf_i0)
-    - [8.1.1. Property `XlbConfig > provider > oneOf > item 0 > static`](#provider_oneOf_i0_static)
-      - [8.1.1.1. Property `XlbConfig > provider > oneOf > item 0 > static > backends`](#provider_oneOf_i0_static_backends)
-        - [8.1.1.1.1. XlbConfig > provider > oneOf > item 0 > static > backends > Host](#provider_oneOf_i0_static_backends_items)
-          - [8.1.1.1.1.1. Property `XlbConfig > provider > oneOf > item 0 > static > backends > backends items > ip`](#provider_oneOf_i0_static_backends_items_ip)
-          - [8.1.1.1.1.2. Property `XlbConfig > provider > oneOf > item 0 > static > backends > backends items > name`](#provider_oneOf_i0_static_backends_items_name)
-  - [8.2. Property `XlbConfig > provider > oneOf > item 1`](#provider_oneOf_i1)
-    - [8.2.1. Property `XlbConfig > provider > oneOf > item 1 > kubernetes`](#provider_oneOf_i1_kubernetes)
-      - [8.2.1.1. Property `XlbConfig > provider > oneOf > item 1 > kubernetes > namespace`](#provider_oneOf_i1_kubernetes_namespace)
-      - [8.2.1.2. Property `XlbConfig > provider > oneOf > item 1 > kubernetes > service`](#provider_oneOf_i1_kubernetes_service)
-- [9. Property `XlbConfig > shutdown_timeout`](#shutdown_timeout)
+- [1. Property `XlbConfig > admin`](#admin)
+  - [1.1. Property `XlbConfig > admin > address`](#admin_address)
+  - [1.2. Property `XlbConfig > admin > port`](#admin_port)
+- [2. Property `XlbConfig > listen`](#listen)
+  - [2.1. Property `XlbConfig > listen > oneOf > item 0`](#listen_oneOf_i0)
+  - [2.2. Property `XlbConfig > listen > oneOf > item 1`](#listen_oneOf_i1)
+    - [2.2.1. Property `XlbConfig > listen > oneOf > item 1 > ip`](#listen_oneOf_i1_ip)
+- [3. Property `XlbConfig > mode`](#mode)
+  - [3.1. Property `XlbConfig > mode > oneOf > item 0`](#mode_oneOf_i0)
+  - [3.2. Property `XlbConfig > mode > oneOf > item 1`](#mode_oneOf_i1)
+- [4. Property `XlbConfig > name`](#name)
+- [5. Property `XlbConfig > orphan_ttl_secs`](#orphan_ttl_secs)
+- [6. Property `XlbConfig > otel`](#otel)
+  - [6.1. Property `XlbConfig > otel > anyOf > OtelConfig`](#otel_anyOf_i0)
+    - [6.1.1. Property `XlbConfig > otel > anyOf > item 0 > enabled`](#otel_anyOf_i0_enabled)
+    - [6.1.2. Property `XlbConfig > otel > anyOf > item 0 > endpoint`](#otel_anyOf_i0_endpoint)
+    - [6.1.3. Property `XlbConfig > otel > anyOf > item 0 > export_interval_secs`](#otel_anyOf_i0_export_interval_secs)
+    - [6.1.4. Property `XlbConfig > otel > anyOf > item 0 > headers`](#otel_anyOf_i0_headers)
+      - [6.1.4.1. Property `XlbConfig > otel > anyOf > item 0 > headers > additionalProperties`](#otel_anyOf_i0_headers_additionalProperties)
+    - [6.1.5. Property `XlbConfig > otel > anyOf > item 0 > protocol`](#otel_anyOf_i0_protocol)
+  - [6.2. Property `XlbConfig > otel > anyOf > item 1`](#otel_anyOf_i1)
+- [7. Property `XlbConfig > ports`](#ports)
+  - [7.1. XlbConfig > ports > PortMapping](#ports_items)
+    - [7.1.1. Property `XlbConfig > ports > ports items > local_port`](#ports_items_local_port)
+    - [7.1.2. Property `XlbConfig > ports > ports items > remote_port`](#ports_items_remote_port)
+- [8. Property `XlbConfig > proto`](#proto)
+- [9. Property `XlbConfig > provider`](#provider)
+  - [9.1. Property `XlbConfig > provider > oneOf > item 0`](#provider_oneOf_i0)
+    - [9.1.1. Property `XlbConfig > provider > oneOf > item 0 > static`](#provider_oneOf_i0_static)
+      - [9.1.1.1. Property `XlbConfig > provider > oneOf > item 0 > static > backends`](#provider_oneOf_i0_static_backends)
+        - [9.1.1.1.1. XlbConfig > provider > oneOf > item 0 > static > backends > Host](#provider_oneOf_i0_static_backends_items)
+          - [9.1.1.1.1.1. Property `XlbConfig > provider > oneOf > item 0 > static > backends > backends items > ip`](#provider_oneOf_i0_static_backends_items_ip)
+          - [9.1.1.1.1.2. Property `XlbConfig > provider > oneOf > item 0 > static > backends > backends items > name`](#provider_oneOf_i0_static_backends_items_name)
+  - [9.2. Property `XlbConfig > provider > oneOf > item 1`](#provider_oneOf_i1)
+    - [9.2.1. Property `XlbConfig > provider > oneOf > item 1 > kubernetes`](#provider_oneOf_i1_kubernetes)
+      - [9.2.1.1. Property `XlbConfig > provider > oneOf > item 1 > kubernetes > namespace`](#provider_oneOf_i1_kubernetes_namespace)
+      - [9.2.1.2. Property `XlbConfig > provider > oneOf > item 1 > kubernetes > service`](#provider_oneOf_i1_kubernetes_service)
+- [10. Property `XlbConfig > shutdown_timeout`](#shutdown_timeout)
 
 **Title:** XlbConfig
 
@@ -48,17 +51,60 @@
 
 | Property                                 | Pattern | Type             | Deprecated | Definition | Title/Description                                                                                                                                                                                          |
 | ---------------------------------------- | ------- | ---------------- | ---------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| - [admin](#admin )                       | No      | object           | No         | In         | Local health, readiness, and administrative status API.                                                                                                                                                    |
 | - [listen](#listen )                     | No      | object           | No         | In         | The IP address to "listen" on which is the expected dest IP value for inbound packets of interest. Default to auto which will pick the primary address of the interface associated with the default route. |
 | - [mode](#mode )                         | No      | object           | No         | In         | Routing mode of either nat or dsr, presently only nat is supported                                                                                                                                         |
 | - [name](#name )                         | No      | string or null   | No         | -          | Optional service name attached to OTEL metrics. Defaults to "xlb" when omitted.                                                                                                                            |
-| - [orphan_ttl_secs](#orphan_ttl_secs )   | No      | integer          | No         | -          | The duration by which an inactive flow, which has not seen any closure, is considered orphaned. Values below five minutes are raised to five minutes at startup.                                             |
+| - [orphan_ttl_secs](#orphan_ttl_secs )   | No      | integer          | No         | -          | The duration by which an inactive flow, which has not seen any closure, is considered orphaned. Values below five minutes are raised to five minutes at startup.                                           |
 | - [otel](#otel )                         | No      | Combination      | No         | -          | Optional OpenTelemetry metrics configuration                                                                                                                                                               |
 | + [ports](#ports )                       | No      | array            | No         | -          | The port mappings of inbound to backend dest ports. E.g. [80 -> 8080], [443 -> 443]                                                                                                                        |
 | - [proto](#proto )                       | No      | enum (of string) | No         | In         | The target protocol to proxy to the backends e.g. tcp or udp                                                                                                                                               |
 | + [provider](#provider )                 | No      | object           | No         | In         | The source of backend hosts to load balance to                                                                                                                                                             |
 | - [shutdown_timeout](#shutdown_timeout ) | No      | integer          | No         | -          | Reactive grace period after a shutdown signal. Matching TCP packets that arrive during this window receive a reset before XLB exits.                                                                       |
 
-## <a name="listen"></a>1. Property `XlbConfig > listen`
+## <a name="admin"></a>1. Property `XlbConfig > admin`
+
+|                           |                  |
+| ------------------------- | ---------------- |
+| **Type**                  | `object`         |
+| **Required**              | No               |
+| **Additional properties** | Any type allowed |
+| **Defined in**            |                  |
+
+**Description:** Local health, readiness, and administrative status API.
+
+| Property                     | Pattern | Type    | Deprecated | Definition | Title/Description                                       |
+| ---------------------------- | ------- | ------- | ---------- | ---------- | ------------------------------------------------------- |
+| - [address](#admin_address ) | No      | string  | No         | -          | Address on which the unauthenticated admin API listens. |
+| - [port](#admin_port )       | No      | integer | No         | -          | TCP port on which the admin API listens.                |
+
+### <a name="admin_address"></a>1.1. Property `XlbConfig > admin > address`
+
+|              |               |
+| ------------ | ------------- |
+| **Type**     | `string`      |
+| **Required** | No            |
+| **Format**   | `ip`          |
+| **Default**  | `"127.0.0.1"` |
+
+**Description:** Address on which the unauthenticated admin API listens.
+
+### <a name="admin_port"></a>1.2. Property `XlbConfig > admin > port`
+
+|              |           |
+| ------------ | --------- |
+| **Type**     | `integer` |
+| **Required** | No        |
+| **Format**   | `uint16`  |
+| **Default**  | `9090`    |
+
+**Description:** TCP port on which the admin API listens.
+
+| Restrictions |     |
+| ------------ | --- |
+| **Minimum**  | N/A |
+
+## <a name="listen"></a>2. Property `XlbConfig > listen`
 
 |                           |                  |
 | ------------------------- | ---------------- |
@@ -75,7 +121,7 @@
 | [item 0](#listen_oneOf_i0) |
 | [item 1](#listen_oneOf_i1) |
 
-### <a name="listen_oneOf_i0"></a>1.1. Property `XlbConfig > listen > oneOf > item 0`
+### <a name="listen_oneOf_i0"></a>2.1. Property `XlbConfig > listen > oneOf > item 0`
 
 |              |                    |
 | ------------ | ------------------ |
@@ -87,7 +133,7 @@
 Must be one of:
 * "auto"
 
-### <a name="listen_oneOf_i1"></a>1.2. Property `XlbConfig > listen > oneOf > item 1`
+### <a name="listen_oneOf_i1"></a>2.2. Property `XlbConfig > listen > oneOf > item 1`
 
 |                           |             |
 | ------------------------- | ----------- |
@@ -101,14 +147,14 @@ Must be one of:
 | ---------------------------- | ------- | ------ | ---------- | ---------- | ----------------- |
 | + [ip](#listen_oneOf_i1_ip ) | No      | string | No         | -          | -                 |
 
-#### <a name="listen_oneOf_i1_ip"></a>1.2.1. Property `XlbConfig > listen > oneOf > item 1 > ip`
+#### <a name="listen_oneOf_i1_ip"></a>2.2.1. Property `XlbConfig > listen > oneOf > item 1 > ip`
 
 |              |          |
 | ------------ | -------- |
 | **Type**     | `string` |
 | **Required** | Yes      |
 
-## <a name="mode"></a>2. Property `XlbConfig > mode`
+## <a name="mode"></a>3. Property `XlbConfig > mode`
 
 |                           |                  |
 | ------------------------- | ---------------- |
@@ -125,7 +171,7 @@ Must be one of:
 | [item 0](#mode_oneOf_i0) |
 | [item 1](#mode_oneOf_i1) |
 
-### <a name="mode_oneOf_i0"></a>2.1. Property `XlbConfig > mode > oneOf > item 0`
+### <a name="mode_oneOf_i0"></a>3.1. Property `XlbConfig > mode > oneOf > item 0`
 
 |              |                    |
 | ------------ | ------------------ |
@@ -137,7 +183,7 @@ Must be one of:
 Must be one of:
 * "nat"
 
-### <a name="mode_oneOf_i1"></a>2.2. Property `XlbConfig > mode > oneOf > item 1`
+### <a name="mode_oneOf_i1"></a>3.2. Property `XlbConfig > mode > oneOf > item 1`
 
 |              |                    |
 | ------------ | ------------------ |
@@ -149,7 +195,7 @@ Must be one of:
 Must be one of:
 * "dsr"
 
-## <a name="name"></a>3. Property `XlbConfig > name`
+## <a name="name"></a>4. Property `XlbConfig > name`
 
 |              |                  |
 | ------------ | ---------------- |
@@ -158,7 +204,7 @@ Must be one of:
 
 **Description:** Optional service name attached to OTEL metrics. Defaults to "xlb" when omitted.
 
-## <a name="orphan_ttl_secs"></a>4. Property `XlbConfig > orphan_ttl_secs`
+## <a name="orphan_ttl_secs"></a>5. Property `XlbConfig > orphan_ttl_secs`
 
 |              |           |
 | ------------ | --------- |
@@ -171,9 +217,9 @@ Must be one of:
 
 | Restrictions |     |
 | ------------ | --- |
-| **Minimum**  | 0   |
+| **Minimum**  | N/A |
 
-## <a name="otel"></a>5. Property `XlbConfig > otel`
+## <a name="otel"></a>6. Property `XlbConfig > otel`
 
 |                           |                  |
 | ------------------------- | ---------------- |
@@ -188,7 +234,7 @@ Must be one of:
 | [OtelConfig](#otel_anyOf_i0) |
 | [item 1](#otel_anyOf_i1)     |
 
-### <a name="otel_anyOf_i0"></a>5.1. Property `XlbConfig > otel > anyOf > OtelConfig`
+### <a name="otel_anyOf_i0"></a>6.1. Property `XlbConfig > otel > anyOf > OtelConfig`
 
 |                           |                          |
 | ------------------------- | ------------------------ |
@@ -207,7 +253,7 @@ Must be one of:
 | - [headers](#otel_anyOf_i0_headers )                           | No      | object           | No         | -          | Optional headers for authentication (e.g., API keys)        |
 | - [protocol](#otel_anyOf_i0_protocol )                         | No      | enum (of string) | No         | In         | Protocol: grpc or http/protobuf                             |
 
-#### <a name="otel_anyOf_i0_enabled"></a>5.1.1. Property `XlbConfig > otel > anyOf > item 0 > enabled`
+#### <a name="otel_anyOf_i0_enabled"></a>6.1.1. Property `XlbConfig > otel > anyOf > item 0 > enabled`
 
 |              |           |
 | ------------ | --------- |
@@ -217,7 +263,7 @@ Must be one of:
 
 **Description:** Enable/disable OTEL metrics export
 
-#### <a name="otel_anyOf_i0_endpoint"></a>5.1.2. Property `XlbConfig > otel > anyOf > item 0 > endpoint`
+#### <a name="otel_anyOf_i0_endpoint"></a>6.1.2. Property `XlbConfig > otel > anyOf > item 0 > endpoint`
 
 |              |          |
 | ------------ | -------- |
@@ -226,7 +272,7 @@ Must be one of:
 
 **Description:** OTLP endpoint (e.g., "http://otel-collector:4317" for gRPC)
 
-#### <a name="otel_anyOf_i0_export_interval_secs"></a>5.1.3. Property `XlbConfig > otel > anyOf > item 0 > export_interval_secs`
+#### <a name="otel_anyOf_i0_export_interval_secs"></a>6.1.3. Property `XlbConfig > otel > anyOf > item 0 > export_interval_secs`
 
 |              |           |
 | ------------ | --------- |
@@ -241,7 +287,7 @@ Must be one of:
 | ------------ | --- |
 | **Minimum**  | N/A |
 
-#### <a name="otel_anyOf_i0_headers"></a>5.1.4. Property `XlbConfig > otel > anyOf > item 0 > headers`
+#### <a name="otel_anyOf_i0_headers"></a>6.1.4. Property `XlbConfig > otel > anyOf > item 0 > headers`
 
 |                           |                                                                                                    |
 | ------------------------- | -------------------------------------------------------------------------------------------------- |
@@ -256,14 +302,14 @@ Must be one of:
 | -------------------------------------------------- | ------- | ------ | ---------- | ---------- | ----------------- |
 | - [](#otel_anyOf_i0_headers_additionalProperties ) | No      | string | No         | -          | -                 |
 
-##### <a name="otel_anyOf_i0_headers_additionalProperties"></a>5.1.4.1. Property `XlbConfig > otel > anyOf > item 0 > headers > additionalProperties`
+##### <a name="otel_anyOf_i0_headers_additionalProperties"></a>6.1.4.1. Property `XlbConfig > otel > anyOf > item 0 > headers > additionalProperties`
 
 |              |          |
 | ------------ | -------- |
 | **Type**     | `string` |
 | **Required** | No       |
 
-#### <a name="otel_anyOf_i0_protocol"></a>5.1.5. Property `XlbConfig > otel > anyOf > item 0 > protocol`
+#### <a name="otel_anyOf_i0_protocol"></a>6.1.5. Property `XlbConfig > otel > anyOf > item 0 > protocol`
 
 |                |                    |
 | -------------- | ------------------ |
@@ -277,14 +323,14 @@ Must be one of:
 * "grpc"
 * "http"
 
-### <a name="otel_anyOf_i1"></a>5.2. Property `XlbConfig > otel > anyOf > item 1`
+### <a name="otel_anyOf_i1"></a>6.2. Property `XlbConfig > otel > anyOf > item 1`
 
 |              |        |
 | ------------ | ------ |
 | **Type**     | `null` |
 | **Required** | No     |
 
-## <a name="ports"></a>6. Property `XlbConfig > ports`
+## <a name="ports"></a>7. Property `XlbConfig > ports`
 
 |              |         |
 | ------------ | ------- |
@@ -305,7 +351,7 @@ Must be one of:
 | ------------------------------- | --------------------------------------------------------------------------------------------------- |
 | [PortMapping](#ports_items)     | Generic port mapping struct representing a port on the local machine and a port on some remote host |
 
-### <a name="ports_items"></a>6.1. XlbConfig > ports > PortMapping
+### <a name="ports_items"></a>7.1. XlbConfig > ports > PortMapping
 
 |                           |                           |
 | ------------------------- | ------------------------- |
@@ -321,7 +367,7 @@ Must be one of:
 | + [local_port](#ports_items_local_port )   | No      | integer | No         | -          | Port on this local machine e.g. could be the lb listen port, the source port we have assigned |
 | + [remote_port](#ports_items_remote_port ) | No      | integer | No         | -          | Port on a remote host e.g. backend node service port, or a src port from a client connection  |
 
-#### <a name="ports_items_local_port"></a>6.1.1. Property `XlbConfig > ports > ports items > local_port`
+#### <a name="ports_items_local_port"></a>7.1.1. Property `XlbConfig > ports > ports items > local_port`
 
 |              |           |
 | ------------ | --------- |
@@ -335,7 +381,7 @@ Must be one of:
 | ------------ | --- |
 | **Minimum**  | N/A |
 
-#### <a name="ports_items_remote_port"></a>6.1.2. Property `XlbConfig > ports > ports items > remote_port`
+#### <a name="ports_items_remote_port"></a>7.1.2. Property `XlbConfig > ports > ports items > remote_port`
 
 |              |           |
 | ------------ | --------- |
@@ -349,7 +395,7 @@ Must be one of:
 | ------------ | --- |
 | **Minimum**  | N/A |
 
-## <a name="proto"></a>7. Property `XlbConfig > proto`
+## <a name="proto"></a>8. Property `XlbConfig > proto`
 
 |                |                    |
 | -------------- | ------------------ |
@@ -364,7 +410,7 @@ Must be one of:
 * "tcp"
 * "udp"
 
-## <a name="provider"></a>8. Property `XlbConfig > provider`
+## <a name="provider"></a>9. Property `XlbConfig > provider`
 
 |                           |                  |
 | ------------------------- | ---------------- |
@@ -380,7 +426,7 @@ Must be one of:
 | [item 0](#provider_oneOf_i0) |
 | [item 1](#provider_oneOf_i1) |
 
-### <a name="provider_oneOf_i0"></a>8.1. Property `XlbConfig > provider > oneOf > item 0`
+### <a name="provider_oneOf_i0"></a>9.1. Property `XlbConfig > provider > oneOf > item 0`
 
 |                           |             |
 | ------------------------- | ----------- |
@@ -392,7 +438,7 @@ Must be one of:
 | -------------------------------------- | ------- | ------ | ---------- | ---------- | ----------------- |
 | + [static](#provider_oneOf_i0_static ) | No      | object | No         | -          | -                 |
 
-#### <a name="provider_oneOf_i0_static"></a>8.1.1. Property `XlbConfig > provider > oneOf > item 0 > static`
+#### <a name="provider_oneOf_i0_static"></a>9.1.1. Property `XlbConfig > provider > oneOf > item 0 > static`
 
 |                           |                  |
 | ------------------------- | ---------------- |
@@ -404,7 +450,7 @@ Must be one of:
 | ------------------------------------------------- | ------- | ----- | ---------- | ---------- | ----------------- |
 | + [backends](#provider_oneOf_i0_static_backends ) | No      | array | No         | -          | -                 |
 
-##### <a name="provider_oneOf_i0_static_backends"></a>8.1.1.1. Property `XlbConfig > provider > oneOf > item 0 > static > backends`
+##### <a name="provider_oneOf_i0_static_backends"></a>9.1.1.1. Property `XlbConfig > provider > oneOf > item 0 > static > backends`
 
 |              |         |
 | ------------ | ------- |
@@ -423,7 +469,7 @@ Must be one of:
 | ------------------------------------------------ | ----------- |
 | [Host](#provider_oneOf_i0_static_backends_items) | -           |
 
-###### <a name="provider_oneOf_i0_static_backends_items"></a>8.1.1.1.1. XlbConfig > provider > oneOf > item 0 > static > backends > Host
+###### <a name="provider_oneOf_i0_static_backends_items"></a>9.1.1.1.1. XlbConfig > provider > oneOf > item 0 > static > backends > Host
 
 |                           |                    |
 | ------------------------- | ------------------ |
@@ -437,7 +483,7 @@ Must be one of:
 | + [ip](#provider_oneOf_i0_static_backends_items_ip )     | No      | string | No         | -          | -                 |
 | + [name](#provider_oneOf_i0_static_backends_items_name ) | No      | string | No         | -          | -                 |
 
-###### <a name="provider_oneOf_i0_static_backends_items_ip"></a>8.1.1.1.1.1. Property `XlbConfig > provider > oneOf > item 0 > static > backends > backends items > ip`
+###### <a name="provider_oneOf_i0_static_backends_items_ip"></a>9.1.1.1.1.1. Property `XlbConfig > provider > oneOf > item 0 > static > backends > backends items > ip`
 
 |              |          |
 | ------------ | -------- |
@@ -445,14 +491,14 @@ Must be one of:
 | **Required** | Yes      |
 | **Format**   | `ip`     |
 
-###### <a name="provider_oneOf_i0_static_backends_items_name"></a>8.1.1.1.1.2. Property `XlbConfig > provider > oneOf > item 0 > static > backends > backends items > name`
+###### <a name="provider_oneOf_i0_static_backends_items_name"></a>9.1.1.1.1.2. Property `XlbConfig > provider > oneOf > item 0 > static > backends > backends items > name`
 
 |              |          |
 | ------------ | -------- |
 | **Type**     | `string` |
 | **Required** | Yes      |
 
-### <a name="provider_oneOf_i1"></a>8.2. Property `XlbConfig > provider > oneOf > item 1`
+### <a name="provider_oneOf_i1"></a>9.2. Property `XlbConfig > provider > oneOf > item 1`
 
 |                           |             |
 | ------------------------- | ----------- |
@@ -464,7 +510,7 @@ Must be one of:
 | ---------------------------------------------- | ------- | ------ | ---------- | ---------- | ----------------- |
 | + [kubernetes](#provider_oneOf_i1_kubernetes ) | No      | object | No         | -          | -                 |
 
-#### <a name="provider_oneOf_i1_kubernetes"></a>8.2.1. Property `XlbConfig > provider > oneOf > item 1 > kubernetes`
+#### <a name="provider_oneOf_i1_kubernetes"></a>9.2.1. Property `XlbConfig > provider > oneOf > item 1 > kubernetes`
 
 |                           |                  |
 | ------------------------- | ---------------- |
@@ -477,21 +523,21 @@ Must be one of:
 | + [namespace](#provider_oneOf_i1_kubernetes_namespace ) | No      | string | No         | -          | -                 |
 | + [service](#provider_oneOf_i1_kubernetes_service )     | No      | string | No         | -          | -                 |
 
-##### <a name="provider_oneOf_i1_kubernetes_namespace"></a>8.2.1.1. Property `XlbConfig > provider > oneOf > item 1 > kubernetes > namespace`
+##### <a name="provider_oneOf_i1_kubernetes_namespace"></a>9.2.1.1. Property `XlbConfig > provider > oneOf > item 1 > kubernetes > namespace`
 
 |              |          |
 | ------------ | -------- |
 | **Type**     | `string` |
 | **Required** | Yes      |
 
-##### <a name="provider_oneOf_i1_kubernetes_service"></a>8.2.1.2. Property `XlbConfig > provider > oneOf > item 1 > kubernetes > service`
+##### <a name="provider_oneOf_i1_kubernetes_service"></a>9.2.1.2. Property `XlbConfig > provider > oneOf > item 1 > kubernetes > service`
 
 |              |          |
 | ------------ | -------- |
 | **Type**     | `string` |
 | **Required** | Yes      |
 
-## <a name="shutdown_timeout"></a>9. Property `XlbConfig > shutdown_timeout`
+## <a name="shutdown_timeout"></a>10. Property `XlbConfig > shutdown_timeout`
 
 |              |           |
 | ------------ | --------- |

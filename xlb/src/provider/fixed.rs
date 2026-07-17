@@ -27,6 +27,10 @@ impl BackendProvider for FixedProvider {
         self.hosts.clone()
     }
 
+    fn is_healthy(&self) -> bool {
+        true
+    }
+
     async fn shutdown(&self) -> Result<()> {
         Ok(())
     }

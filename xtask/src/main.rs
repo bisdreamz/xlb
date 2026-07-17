@@ -1,4 +1,4 @@
-use anyhow::{bail, Context as _, Result};
+use anyhow::{Context as _, Result, bail};
 use schemars::schema_for;
 use std::fs;
 use std::process::Command;
@@ -77,9 +77,10 @@ fn remove_nondeterministic_generator_footer(path: &str) -> Result<()> {
     let mut contents = fs::read_to_string(path)?;
     if let Some(footer_start) = contents.rfind(FOOTER) {
         contents.truncate(footer_start);
-        contents.push('\n');
-        fs::write(path, contents)?;
     }
+    contents.truncate(contents.trim_end().len());
+    contents.push('\n');
+    fs::write(path, contents)?;
 
     Ok(())
 }

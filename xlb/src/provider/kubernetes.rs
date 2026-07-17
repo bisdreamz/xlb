@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use k8s_openapi::api::core::v1::Service;
 use k8s_openapi::api::discovery::v1::EndpointSlice;
+use kube::runtime::WatchStreamExt;
 use kube::runtime::watcher::{self, Event};
 use kube::{Api, Client};
 use log::{debug, info, warn};
@@ -123,7 +124,8 @@ impl BackendProvider for KubernetesProvider {
             let watch = watcher::watcher(
                 slices_api,
                 watcher::Config::default().labels(&label_selector),
-            );
+            )
+            .default_backoff();
             futures::pin_mut!(watch);
 
             let mut state = EndpointSliceState::default();
@@ -132,7 +134,7 @@ impl BackendProvider for KubernetesProvider {
             while let Some(event) = watch.next().await {
                 match event {
                     Ok(Event::Apply(slice)) => {
-                        Self::apply_slice(&mut state, &slice, &backends, &namespace, &service)
+                        Self::apply_slice(&mut state, &slice, &backends, &namespace, &service);
                     }
                     Ok(Event::Init) => {
                         debug!(
@@ -174,10 +176,12 @@ impl BackendProvider for KubernetesProvider {
                             let _ = tx.send(());
                         }
                     }
-                    Err(error) => warn!(
-                        "EndpointSlice watch error for service {}/{}: {}",
-                        namespace, service, error
-                    ),
+                    Err(error) => {
+                        warn!(
+                            "EndpointSlice watch error for service {}/{}: {}",
+                            namespace, service, error
+                        );
+                    }
                 }
             }
 
@@ -220,6 +224,14 @@ impl BackendProvider for KubernetesProvider {
 
     fn get_backends(&self) -> Vec<Host> {
         self.backends.read().expect("backend lock poisoned").clone()
+    }
+
+    fn is_healthy(&self) -> bool {
+        self.watch_handle
+            .read()
+            .expect("watch handle lock poisoned")
+            .as_ref()
+            .is_some_and(|handle| !handle.is_finished())
     }
 
     async fn shutdown(&self) -> Result<()> {

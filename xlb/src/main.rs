@@ -3,16 +3,18 @@ mod ebpf;
 mod r#loop;
 mod metrics;
 mod provider;
+mod status;
 mod system;
 
 use crate::config::{BackendSource, XlbConfig};
-use crate::r#loop::MaintenanceLoop;
+use crate::r#loop::{MaintenanceLoop, MaintenanceMaps};
 use crate::provider::{BackendProvider, FixedProvider, KubernetesProvider};
+use crate::status::{PortStatus, ProviderKind, StatusMetadata, StatusState, start_admin_server};
 use anyhow::{Context, anyhow};
 use aya::maps::{Array, HashMap, PerCpuArray};
-use log::info;
+use log::{info, warn};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::signal::unix::{SignalKind, signal};
 use xlb_common::types::{Backend, Flow, FlowKeyV4};
 
@@ -27,18 +29,31 @@ async fn main() -> anyhow::Result<()> {
 
     info!("Config {:?}", config);
 
+    if !config.admin.address.is_loopback() {
+        warn!(
+            "Admin API is unauthenticated and configured on non-loopback address {}",
+            config.admin.address
+        );
+    }
+
+    let service_name = config.name.clone().unwrap_or_else(|| "xlb".to_string());
+
     if let Some(otel_config) = &config.otel
         && otel_config.enabled
     {
-        let service_name = config.name.clone().unwrap_or_else(|| "xlb".to_string());
-        metrics::init(otel_config, service_name)?;
+        metrics::init(otel_config, service_name.clone())?;
     }
 
-    let provider: Arc<dyn BackendProvider> = match &config.provider {
-        BackendSource::Static { backends } => Arc::new(FixedProvider::new(backends.clone())),
-        BackendSource::Kubernetes { namespace, service } => {
-            Arc::new(KubernetesProvider::new(namespace.clone(), service.clone()))
-        }
+    let (provider, provider_kind): (Arc<dyn BackendProvider>, ProviderKind) = match &config.provider
+    {
+        BackendSource::Static { backends } => (
+            Arc::new(FixedProvider::new(backends.clone())),
+            ProviderKind::Static,
+        ),
+        BackendSource::Kubernetes { namespace, service } => (
+            Arc::new(KubernetesProvider::new(namespace.clone(), service.clone())),
+            ProviderKind::Kubernetes,
+        ),
     };
 
     provider
@@ -50,13 +65,6 @@ async fn main() -> anyhow::Result<()> {
         mut ebpf,
         attached_interfaces,
     } = ebpf::load_ebpf_program(&config, &iface).context("Failed to load eBPF program")?;
-
-    info!(
-        "Started XLB service ({}) on {} ({:?})",
-        config.name.as_ref().unwrap_or(&"xlb".into()),
-        iface.name,
-        iface.ip
-    );
 
     let ebpf_backends: Array<_, Backend> = ebpf
         .take_map("BACKENDS")
@@ -71,48 +79,96 @@ async fn main() -> anyhow::Result<()> {
         .ok_or_else(|| anyhow!("Failed to load FLOW_PAIR_INVARIANTS map"))?
         .try_into()?;
 
+    let status = Arc::new(StatusState::new(StatusMetadata {
+        service: service_name.clone(),
+        provider: provider_kind,
+        listen_address: iface.ip,
+        listen_interface: iface.name.clone(),
+        attached_interfaces: attached_interfaces.clone(),
+        protocol: config.proto,
+        routing_mode: config.mode,
+        ports: config
+            .ports
+            .iter()
+            .map(|port| PortStatus {
+                listen: port.local_port,
+                backend: port.remote_port,
+            })
+            .collect(),
+    }));
+    let mut admin_server = start_admin_server(config.admin.socket_addr(), status.clone()).await?;
+
     let maint_loop = MaintenanceLoop::new(
         provider.clone(),
-        ebpf_backends,
-        ebpf_flows,
-        flow_pair_invariants,
+        MaintenanceMaps {
+            backends: ebpf_backends,
+            flows: ebpf_flows,
+            flow_pair_invariants,
+        },
         Duration::from_secs(config.orphan_ttl_secs as u64),
         Duration::from_mins(1),
         attached_interfaces,
+        status.clone(),
     );
 
-    let loop_handle = maint_loop.start(Duration::from_secs(1));
+    let mut loop_handle = maint_loop.start(Duration::from_secs(1));
+    status.mark_running();
+    info!(
+        "Started XLB service ({}) on {} ({:?})",
+        service_name, iface.name, iface.ip
+    );
 
     let mut sigterm = signal(SignalKind::terminate())?;
     let mut sigint = signal(SignalKind::interrupt())?;
 
     info!("Waiting for shutdown signal...");
 
-    tokio::select! {
-        _ = sigterm.recv() => info!("Received SIGTERM"),
-        _ = sigint.recv() => info!("Received SIGINT"),
+    let shutdown_result = tokio::select! {
+        _ = sigterm.recv() => {
+            info!("Received SIGTERM");
+            Ok(())
+        }
+        _ = sigint.recv() => {
+            info!("Received SIGINT");
+            Ok(())
+        }
+        result = admin_server.wait_for_unexpected_exit() => result,
+        result = loop_handle.wait_for_unexpected_exit() => result,
+    };
+
+    if let Err(error) = &shutdown_result {
+        warn!("{error:#}; stopping XLB");
     }
 
     info!("Beginning graceful shutdown...");
-
-    loop_handle.stop();
-    info!("Maintenance loop stopped");
-    provider
-        .shutdown()
-        .await
-        .context("Failed to shutdown backend provider")?;
-    info!("Backend provider shutdown");
+    status.begin_shutdown();
+    let shutdown_started = Instant::now();
 
     let mut shutdown_flag: Array<_, u8> = ebpf
         .map_mut("SHUTDOWN")
         .ok_or_else(|| anyhow!("Failed to load SHUTDOWN map"))?
         .try_into()?;
     shutdown_flag.set(0, 1, 0)?;
+    loop_handle.request_stop();
+
+    provider
+        .shutdown()
+        .await
+        .context("Failed to shutdown backend provider")?;
+    info!("Backend provider shutdown");
 
     info!("Waiting for graceful shutdown timeout, will reset any active conns...");
-    tokio::time::sleep(Duration::from_secs(config.shutdown_timeout as u64)).await;
+    let shutdown_timeout = Duration::from_secs(config.shutdown_timeout as u64);
+    tokio::time::sleep(shutdown_timeout.saturating_sub(shutdown_started.elapsed())).await;
 
     info!("Graceful shutdown complete");
+    let maintenance_result = loop_handle.shutdown(Duration::from_secs(1)).await;
+    admin_server
+        .shutdown()
+        .await
+        .context("Failed to shutdown admin HTTP server")?;
+    maintenance_result.context("Failed to stop maintenance loop")?;
+    info!("Maintenance loop stopped");
 
-    Ok(())
+    shutdown_result
 }

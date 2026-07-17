@@ -1,7 +1,7 @@
 use super::utils;
 use aya::maps::{HashMap, MapData, MapError};
 use log::trace;
-use std::collections::HashSet;
+use std::collections::{HashMap as StdHashMap, HashSet};
 use std::time::Duration;
 use xlb_common::types::{Flow, FlowKeyV4};
 
@@ -21,6 +21,7 @@ pub(super) struct CleanupSummary {
     fins: u64,
     resets: u64,
     pub(super) orphans: u64,
+    pub(super) orphans_by_backend: StdHashMap<u128, u64>,
     pub(super) invariant_violations: u64,
 }
 
@@ -29,6 +30,7 @@ struct CleanupPlan {
     key: FlowKeyV4,
     counter_key: Option<FlowKeyV4>,
     pair_tag: u32,
+    backend_ip: u128,
     reason: CleanupReason,
     invariant_violation: bool,
 }
@@ -94,6 +96,7 @@ fn plan_pair_cleanup(
         key,
         counter_key: reciprocal_counter.map(|_| flow.counter_flow_key),
         pair_tag: flow.pair_tag,
+        backend_ip: flow.backend_ip,
         reason: pair_reason,
         invariant_violation: flow.pair_invalid || reciprocal_counter.is_none(),
     })
@@ -138,11 +141,7 @@ pub(super) fn prune_orphaned_or_closed(
             continue;
         };
 
-        scheduled.insert(plan.key);
-        if let Some(counter_key) = plan.counter_key {
-            scheduled.insert(counter_key);
-        }
-        plans.push(plan);
+        schedule_cleanup_plan(&mut scheduled, &mut plans, plan);
     }
 
     let mut summary = CleanupSummary {
@@ -157,13 +156,7 @@ pub(super) fn prune_orphaned_or_closed(
         // the narrow window between this lookup and deletion; the map API cannot
         // make that final state-check-and-delete atomic.
         if remove_pair_generation(flow_map, &plan.key, plan.pair_tag) {
-            summary.connections += 1;
-            match plan.reason {
-                CleanupReason::Fin => summary.fins += 1,
-                CleanupReason::Reset => summary.resets += 1,
-                CleanupReason::Orphan => summary.orphans += 1,
-                CleanupReason::Invalid => {}
-            }
+            record_cleanup_success(&mut summary, &plan);
         } else {
             summary.invariant_violations += 1;
         }
@@ -186,6 +179,37 @@ pub(super) fn prune_orphaned_or_closed(
     summary
 }
 
+fn schedule_cleanup_plan(
+    scheduled: &mut HashSet<FlowKeyV4>,
+    plans: &mut Vec<CleanupPlan>,
+    plan: CleanupPlan,
+) {
+    if !scheduled.insert(plan.key) {
+        return;
+    }
+    if let Some(counter_key) = plan.counter_key {
+        scheduled.insert(counter_key);
+    }
+    plans.push(plan);
+}
+
+fn record_cleanup_success(summary: &mut CleanupSummary, plan: &CleanupPlan) {
+    summary.connections += 1;
+    match plan.reason {
+        CleanupReason::Fin => summary.fins += 1,
+        CleanupReason::Reset => summary.resets += 1,
+        CleanupReason::Orphan => {
+            summary.orphans += 1;
+            let backend_orphans = summary
+                .orphans_by_backend
+                .entry(plan.backend_ip)
+                .or_default();
+            *backend_orphans = backend_orphans.saturating_add(1);
+        }
+        CleanupReason::Invalid => {}
+    }
+}
+
 fn remove_pair_generation(
     flow_map: &mut HashMap<MapData, FlowKeyV4, Flow>,
     key: &FlowKeyV4,
@@ -199,7 +223,11 @@ fn remove_pair_generation(
 
 #[cfg(test)]
 mod tests {
-    use super::{CleanupReason, plan_pair_cleanup};
+    use super::{
+        CleanupReason, CleanupSummary, plan_pair_cleanup, record_cleanup_success,
+        schedule_cleanup_plan,
+    };
+    use std::collections::HashSet;
     use std::time::Duration;
     use xlb_common::types::{Flow, FlowDirection, FlowKeyV4};
 
@@ -267,17 +295,106 @@ mod tests {
     }
 
     #[test]
-    fn one_stale_direction_schedules_the_reciprocal_pair() {
+    fn only_to_server_stale_counts_one_orphaned_pair() {
         let (server_key, client_key) = keys();
         let mut server = flow(FlowDirection::ToServer, client_key);
         let client = flow(FlowDirection::ToClient, server_key);
         server.last_seen_ns = 0;
 
         let cleanup = plan(server_key, &server, Some(&client)).expect("stale pair should clean");
+        let mut summary = CleanupSummary::default();
+        record_cleanup_success(&mut summary, &cleanup);
 
         assert_eq!(cleanup.reason, CleanupReason::Orphan);
         assert_eq!(cleanup.counter_key, Some(client_key));
         assert!(!cleanup.invariant_violation);
+        assert_eq!(summary.orphans, 1);
+    }
+
+    #[test]
+    fn only_to_client_stale_counts_one_orphaned_pair() {
+        let (server_key, client_key) = keys();
+        let server = flow(FlowDirection::ToServer, client_key);
+        let mut client = flow(FlowDirection::ToClient, server_key);
+        client.last_seen_ns = 0;
+
+        let cleanup = plan(client_key, &client, Some(&server)).expect("stale pair should clean");
+        let mut summary = CleanupSummary::default();
+        record_cleanup_success(&mut summary, &cleanup);
+
+        assert_eq!(cleanup.reason, CleanupReason::Orphan);
+        assert_eq!(cleanup.counter_key, Some(server_key));
+        assert_eq!(summary.orphans, 1);
+    }
+
+    #[test]
+    fn both_stale_directions_schedule_and_count_one_pair() {
+        let (server_key, client_key) = keys();
+        let mut server = flow(FlowDirection::ToServer, client_key);
+        let mut client = flow(FlowDirection::ToClient, server_key);
+        server.last_seen_ns = 0;
+        client.last_seen_ns = 0;
+        let mut scheduled = HashSet::new();
+        let mut plans = Vec::new();
+
+        schedule_cleanup_plan(
+            &mut scheduled,
+            &mut plans,
+            plan(server_key, &server, Some(&client)).expect("server plan"),
+        );
+        schedule_cleanup_plan(
+            &mut scheduled,
+            &mut plans,
+            plan(client_key, &client, Some(&server)).expect("client plan"),
+        );
+        let mut summary = CleanupSummary::default();
+        for cleanup in &plans {
+            record_cleanup_success(&mut summary, cleanup);
+        }
+
+        assert_eq!(plans.len(), 1);
+        assert_eq!(summary.orphans, 1);
+    }
+
+    #[test]
+    fn mixed_asymmetric_pairs_count_once_per_backend() {
+        let (server_key, client_key) = keys();
+        let mut server = flow(FlowDirection::ToServer, client_key);
+        let client = flow(FlowDirection::ToClient, server_key);
+        server.last_seen_ns = 0;
+        server.backend_ip = 0x0a00_0001;
+
+        let second_server_key = FlowKeyV4::tcp(
+            0xc000_0202,
+            0xcb00_710a,
+            50_001,
+            80,
+            FlowDirection::ToServer,
+        );
+        let second_client_key = FlowKeyV4::tcp(
+            0xc633_6403,
+            0x0a00_0001,
+            8080,
+            30_001,
+            FlowDirection::ToClient,
+        );
+        let second_server = flow(FlowDirection::ToServer, second_client_key);
+        let mut second_client = flow(FlowDirection::ToClient, second_server_key);
+        second_client.last_seen_ns = 0;
+        second_client.backend_ip = 0x0a00_0002;
+
+        let cleanups = [
+            plan(server_key, &server, Some(&client)).expect("first pair"),
+            plan(second_client_key, &second_client, Some(&second_server)).expect("second pair"),
+        ];
+        let mut summary = CleanupSummary::default();
+        for cleanup in &cleanups {
+            record_cleanup_success(&mut summary, cleanup);
+        }
+
+        assert_eq!(summary.orphans, 2);
+        assert_eq!(summary.orphans_by_backend.get(&0x0a00_0001), Some(&1));
+        assert_eq!(summary.orphans_by_backend.get(&0x0a00_0002), Some(&1));
     }
 
     #[test]

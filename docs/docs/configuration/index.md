@@ -39,6 +39,11 @@ orphan_ttl_secs: 300
 # Graceful shutdown timeout (seconds)
 shutdown_timeout: 15
 
+# Local health and status API
+admin:
+  address: 127.0.0.1
+  port: 9090
+
 # Optional OpenTelemetry metrics
 otel:
   enabled: true
@@ -142,6 +147,36 @@ mode: nat
 ```
 
 Currently only NAT mode is supported; configuring DSR fails startup.
+
+### Health and Status API
+
+XLB serves a small, unauthenticated operational API on `127.0.0.1:9090` by default:
+
+- `GET /healthz` reports whether the process and its essential maintenance/provider tasks are live.
+- `GET /readyz` returns `200` only after the dataplane has a fresh sample, the backend provider is
+  healthy, and at least one backend is routable for new connections. It returns `503` with a stable
+  machine-readable reason otherwise.
+- `GET /api/v1/status` returns the versioned JSON snapshot that will also back the administrative
+  UI.
+
+```yaml
+admin:
+  address: 127.0.0.1
+  port: 9090
+```
+
+The API exposes backend addresses and operational details and does not currently implement
+authentication. Keep it on loopback unless the deployment environment provides access control.
+
+The JSON snapshot includes lifecycle/readiness, provider and dataplane state, discovered and
+routable backends, active and cumulative connection counts, traffic rates and totals, flow-map
+state, and resource utilization. A backend that has left discovery but still owns established flows
+remains visible until those flows close.
+
+For Kubernetes discovery, watch errors retain the last-known-good backend set and retry with the
+kube runtime's default backoff. Provider health in this API version means the initial sync completed
+and the watch task remains alive; it does not claim that the Kubernetes control plane is currently
+reachable. A terminated watch task or stale maintenance sample fails health and readiness.
 
 ### Connection Management
 

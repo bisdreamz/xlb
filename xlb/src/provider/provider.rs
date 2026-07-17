@@ -16,6 +16,10 @@ pub trait BackendProvider: Send + Sync {
     /// Get the current list of backends
     fn get_backends(&self) -> Vec<Host>;
 
+    /// Whether the provider can continue supplying authoritative backend
+    /// state. A provider may remain healthy with zero discovered backends.
+    fn is_healthy(&self) -> bool;
+
     /// Shutdown the provider
     async fn shutdown(&self) -> Result<()>;
 }

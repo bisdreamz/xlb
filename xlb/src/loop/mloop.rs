@@ -1,26 +1,69 @@
-use crate::r#loop::cleanup::prune_orphaned_or_closed;
+use crate::r#loop::cleanup::{CleanupSummary, prune_orphaned_or_closed};
 use crate::r#loop::metrics::Metrics;
 use crate::r#loop::utils;
 use crate::r#loop::utils::LbFlowStats;
 use crate::metrics;
 use crate::provider::{BackendProvider, hosts_to_backends_with_routes};
+use crate::status::StatusState;
 use crate::system::ResourceSampler;
+use anyhow::{Context, Result, anyhow};
 use aya::maps::{Array, HashMap, MapData, PerCpuArray};
 use log::{debug, trace, warn};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
+use tokio::task::JoinHandle;
 use tokio::time::interval;
 use xlb_common::consts;
 use xlb_common::types::{Backend, Flow, FlowKeyV4};
 
 pub struct MaintenanceLoopHandle {
     shutdown: Arc<AtomicBool>,
+    task: Option<JoinHandle<()>>,
+}
+
+/// eBPF maps owned and periodically reconciled by the maintenance loop.
+pub struct MaintenanceMaps {
+    pub backends: Array<MapData, Backend>,
+    pub flows: HashMap<MapData, FlowKeyV4, Flow>,
+    pub flow_pair_invariants: PerCpuArray<MapData, u64>,
 }
 
 impl MaintenanceLoopHandle {
-    pub fn stop(&self) {
+    pub async fn wait_for_unexpected_exit(&mut self) -> Result<()> {
+        let result = self
+            .task
+            .as_mut()
+            .ok_or_else(|| anyhow!("Maintenance loop task has already been joined"))?
+            .await;
+        self.task.take();
+
+        match result {
+            Ok(()) => Err(anyhow!("Maintenance loop stopped unexpectedly")),
+            Err(error) => Err(error).context("Maintenance loop task failed"),
+        }
+    }
+
+    pub fn request_stop(&self) {
         self.shutdown.store(true, Ordering::Relaxed);
+    }
+
+    pub async fn shutdown(mut self, timeout: Duration) -> Result<()> {
+        self.request_stop();
+        if let Some(mut task) = self.task.take() {
+            match tokio::time::timeout(timeout, &mut task).await {
+                Ok(result) => result.context("Maintenance loop task failed")?,
+                Err(_) => {
+                    task.abort();
+                    match task.await {
+                        Ok(()) => {}
+                        Err(error) if error.is_cancelled() => {}
+                        Err(error) => return Err(error).context("Maintenance loop task failed"),
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -55,23 +98,29 @@ pub struct MaintenanceLoop {
     resource_sampler: ResourceSampler,
     /// Suppresses repeated warnings while flow-map iteration remains incomplete.
     flow_iteration_error_reported: bool,
+    /// Latest operational snapshot exposed by the admin API.
+    status: Arc<StatusState>,
 }
 
 impl MaintenanceLoop {
     pub fn new(
         provider: Arc<dyn BackendProvider>,
-        ebpf_backends: Array<MapData, Backend>,
-        ebpf_flows: HashMap<MapData, FlowKeyV4, Flow>,
-        flow_pair_invariants: PerCpuArray<MapData, u64>,
+        maps: MaintenanceMaps,
         orphan_ttl: Duration,
         tcp_time_wait_ttl: Duration,
         attached_interfaces: Vec<String>,
+        status: Arc<StatusState>,
     ) -> Self {
+        let MaintenanceMaps {
+            backends,
+            flows,
+            flow_pair_invariants,
+        } = maps;
         Self {
             shutdown: OnceLock::new(),
             provider,
-            ebpf_backends,
-            ebpf_flows,
+            ebpf_backends: backends,
+            ebpf_flows: flows,
             flow_pair_invariants,
             orphan_ttl,
             tcp_time_wait_ttl,
@@ -80,13 +129,30 @@ impl MaintenanceLoop {
             prev_flow_stats: std::collections::HashMap::new(),
             resource_sampler: ResourceSampler::new(attached_interfaces),
             flow_iteration_error_reported: false,
+            status,
         }
+    }
+
+    fn shutdown_requested(&self) -> bool {
+        self.shutdown
+            .get()
+            .expect("Failed to get shutdown flag")
+            .load(Ordering::Relaxed)
     }
 
     async fn run(&mut self) {
         let now_ns = utils::monotonic_now_ns();
         let new_hosts = self.provider.get_backends();
-        let new_backends = hosts_to_backends_with_routes(&new_hosts).await;
+        let mut new_backends = hosts_to_backends_with_routes(&new_hosts).await;
+
+        if new_backends.len() > consts::MAX_BACKENDS as usize {
+            warn!(
+                "More backends than allowed ({}); ignoring {} excess backend(s)",
+                consts::MAX_BACKENDS,
+                new_backends.len() - consts::MAX_BACKENDS as usize
+            );
+            new_backends.truncate(consts::MAX_BACKENDS as usize);
+        }
 
         if new_backends.is_empty() {
             log::warn!("No backends available - all new connections will be dropped");
@@ -130,9 +196,6 @@ impl MaintenanceLoop {
             .resource_sampler
             .sample(stats.flow_map_entries, stats.flow_map_complete);
 
-        log_pretty_stats(&stats);
-        metrics::log_metrics(&stats, &new_hosts);
-
         // Preserve the pre-existing best-effort flow-stat baseline even when
         // concurrent map churn makes this iteration incomplete. Completeness
         // is required for capacity reporting, but not for approximate traffic
@@ -143,13 +206,6 @@ impl MaintenanceLoop {
             self.ebpf_backends
                 .set(i as u32, backend, 0)
                 .expect("Failed to set backend entry");
-        }
-
-        if new_backends.len() > consts::MAX_BACKENDS as usize {
-            warn!(
-                "More backends than allowed ({}) - dropping extra backends",
-                consts::MAX_BACKENDS
-            );
         }
 
         let empty_backend = Backend::default();
@@ -194,6 +250,19 @@ impl MaintenanceLoop {
             metrics::record_flow_pair_invariant_violations(invariant_violations);
         }
 
+        apply_orphan_cleanup_stats(&mut stats, &cleanup);
+
+        // Readiness describes the backend set actually committed to the BPF
+        // map, never the candidate set observed before reconciliation.
+        self.status.publish(
+            &stats,
+            &new_hosts,
+            &new_backends,
+            self.provider.is_healthy(),
+        );
+        log_pretty_stats(&stats);
+        metrics::log_metrics(&stats, &new_hosts);
+
         self.last_run_ns = now_ns;
     }
 
@@ -210,23 +279,44 @@ impl MaintenanceLoop {
         let mut ticker = interval(Duration::from_secs(tick.as_secs()));
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
-        tokio::spawn(async move {
+        let task = tokio::spawn(async move {
             loop {
                 ticker.tick().await;
+                if self.shutdown_requested() {
+                    break;
+                }
+
                 self.run().await;
 
-                if self
-                    .shutdown
-                    .get()
-                    .expect("Failed to get shutdown flag")
-                    .load(Ordering::Relaxed)
-                {
+                if self.shutdown_requested() {
                     break;
                 }
             }
         });
 
-        MaintenanceLoopHandle { shutdown }
+        MaintenanceLoopHandle {
+            shutdown,
+            task: Some(task),
+        }
+    }
+}
+
+fn apply_orphan_cleanup_stats(stats: &mut LbFlowStats, cleanup: &CleanupSummary) {
+    stats.totals.to_server.orphaned_conns = 0;
+    stats.totals.to_client.orphaned_conns = 0;
+    for backend in stats.backends.values_mut() {
+        backend.to_server.orphaned_conns = 0;
+        backend.to_client.orphaned_conns = 0;
+    }
+
+    stats.totals.to_server.orphaned_conns = u32::try_from(cleanup.orphans).unwrap_or(u32::MAX);
+    for (backend_ip, orphans) in &cleanup.orphans_by_backend {
+        stats
+            .backends
+            .entry(*backend_ip)
+            .or_default()
+            .to_server
+            .orphaned_conns = u32::try_from(*orphans).unwrap_or(u32::MAX);
     }
 }
 
@@ -316,5 +406,54 @@ fn log_pretty_stats(stats: &LbFlowStats) {
                 format_pretty_metrics(&backend_stats.to_client)
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn maintenance_exit_before_shutdown_is_fatal() {
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let task = tokio::spawn(async {});
+        let mut handle = MaintenanceLoopHandle {
+            shutdown,
+            task: Some(task),
+        };
+
+        let error = handle
+            .wait_for_unexpected_exit()
+            .await
+            .expect_err("an unrequested maintenance exit must stop XLB");
+        assert!(error.to_string().contains("stopped unexpectedly"));
+        handle
+            .shutdown(Duration::from_secs(1))
+            .await
+            .expect("join maintenance task");
+    }
+
+    #[test]
+    fn cleanup_results_replace_directional_orphan_estimates() {
+        let backend_ip = u128::from(0x0a00_0001_u32);
+        let mut stats = LbFlowStats::default();
+        stats.totals.to_server.orphaned_conns = 7;
+        stats.totals.to_client.orphaned_conns = 5;
+        stats
+            .backends
+            .entry(backend_ip)
+            .or_default()
+            .to_client
+            .orphaned_conns = 3;
+        let mut cleanup = CleanupSummary::default();
+        cleanup.orphans = 2;
+        cleanup.orphans_by_backend.insert(backend_ip, 2);
+
+        apply_orphan_cleanup_stats(&mut stats, &cleanup);
+
+        assert_eq!(stats.totals.to_server.orphaned_conns, 2);
+        assert_eq!(stats.totals.to_client.orphaned_conns, 0);
+        assert_eq!(stats.backends[&backend_ip].to_server.orphaned_conns, 2);
+        assert_eq!(stats.backends[&backend_ip].to_client.orphaned_conns, 0);
     }
 }

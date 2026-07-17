@@ -1,5 +1,5 @@
 mod cleanup;
-mod metrics;
+pub(crate) mod metrics;
 mod mloop;
 pub(crate) mod utils;
 

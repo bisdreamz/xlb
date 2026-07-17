@@ -1,0 +1,29 @@
+{
+  "name": "xlb-admin-ui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "dev:demo": "vite --mode demo --host 127.0.0.1",
+    "build": "vue-tsc -b && vite build",
+    "build:demo": "vue-tsc -b && vite build --mode demo",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "preview": "vite preview --host 127.0.0.1",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "uplot": "1.6.32",
+    "vue": "3.5.40",
+    "vue-router": "5.2.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.61.1",
+    "@vitejs/plugin-vue": "6.0.2",
+    "prettier": "3.9.5",
+    "typescript": "5.9.3",
+    "vite": "7.3.6",
+    "vue-tsc": "3.1.4"
+  }
+}

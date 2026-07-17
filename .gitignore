@@ -7,6 +7,7 @@ target/
 
 # Admin UI dependencies and generated assets
 admin-ui/node_modules/
+admin-ui/.vite/
 admin-ui/dist/*
 !admin-ui/dist/.gitkeep
 admin-ui/*.tsbuildinfo

@@ -1,5 +1,6 @@
 target/
 admin-ui/node_modules/
+admin-ui/.vite/
 admin-ui/dist/
 admin-ui/playwright-report/
 admin-ui/test-results/

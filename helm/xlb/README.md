@@ -37,7 +37,7 @@ service:
 
 ## Requirements
 
-- Kubernetes 1.20+
+- Kubernetes 1.26+
 - Nodes with XDP-capable network drivers
 - ExternalDNS (optional, for automatic DNS management)
 - OpenTelemetry Collector (optional, for metrics)

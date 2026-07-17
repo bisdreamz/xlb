@@ -1,23 +1,29 @@
+mod endpoints;
+
+use self::endpoints::{EndpointSliceState, SliceApply, replace_backends};
 use crate::config::Host;
 use crate::provider::BackendProvider;
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
 use futures::StreamExt;
-use k8s_openapi::api::core::v1::{Pod, Service};
+use k8s_openapi::api::core::v1::Service;
+use k8s_openapi::api::discovery::v1::EndpointSlice;
 use kube::runtime::watcher::{self, Event};
 use kube::{Api, Client};
 use log::{debug, info, warn};
-use std::collections::HashSet;
-use std::net::IpAddr;
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
 use tokio::task::JoinHandle;
+
+const INITIAL_SYNC_TIMEOUT: Duration = Duration::from_secs(30);
+const SERVICE_NAME_LABEL: &str = "kubernetes.io/service-name";
 
 pub struct KubernetesProvider {
     namespace: String,
     service: String,
-    /// Current backend list, updated by the watcher
+    /// Current backend list, updated by the EndpointSlice watcher.
     backends: Arc<RwLock<Vec<Host>>>,
-    /// Handle to the watch task
+    /// Handle to the watch task.
     watch_handle: Arc<RwLock<Option<JoinHandle<()>>>>,
 }
 
@@ -31,107 +37,48 @@ impl KubernetesProvider {
         }
     }
 
-    fn is_pod_ready(pod: &Pod) -> bool {
-        pod.metadata.deletion_timestamp.is_none()
-            && pod
-                .status
-                .as_ref()
-                .and_then(|s| s.conditions.as_ref())
-                .is_some_and(|conditions| {
-                    conditions
-                        .iter()
-                        .any(|c| c.type_ == "Ready" && c.status == "True")
-                })
-    }
+    fn publish_backends(
+        next: Vec<Host>,
+        backends: &RwLock<Vec<Host>>,
+        namespace: &str,
+        service: &str,
+    ) {
+        let mut current = backends.write().expect("backend lock poisoned");
+        let changes = replace_backends(&mut current, next);
+        let total = current.len();
 
-    fn extract_pod_host(pod: &Pod) -> Option<Host> {
-        let name = pod.metadata.name.clone()?;
-        let status = pod.status.as_ref()?;
-        let ip = status
-            .pod_ips
-            .as_deref()
-            .unwrap_or_default()
-            .iter()
-            .filter_map(|pod_ip| pod_ip.ip.parse::<IpAddr>().ok())
-            .find(IpAddr::is_ipv4)
-            .or_else(|| status.pod_ip.as_ref()?.parse::<IpAddr>().ok())?;
-        if ip.is_ipv6() {
-            warn!(
-                "Ignoring unsupported IPv6 backend pod {} ({}); XLB currently supports only IPv4 backends",
-                name, ip
+        for host in changes.removed {
+            info!(
+                "Removed backend: {} ({}) for service {}/{} (no longer eligible, total: {})",
+                host.name, host.ip, namespace, service, total
             );
-            return None;
         }
-        Some(Host { name, ip })
-    }
-
-    fn reconcile_pod(backends: &mut Vec<Host>, pod: &Pod) -> BackendUpdate {
-        let Some(name) = pod.metadata.name.as_deref() else {
-            return BackendUpdate::Unchanged;
-        };
-
-        if !Self::is_pod_ready(pod) {
-            return Self::remove_backend(backends, name)
-                .map(BackendUpdate::Removed)
-                .unwrap_or(BackendUpdate::Unchanged);
-        }
-
-        let Some(host) = Self::extract_pod_host(pod) else {
-            return Self::remove_backend(backends, name)
-                .map(BackendUpdate::Removed)
-                .unwrap_or(BackendUpdate::Unchanged);
-        };
-
-        match backends.iter_mut().find(|backend| backend.name == name) {
-            Some(existing) if *existing == host => BackendUpdate::Unchanged,
-            Some(existing) => {
-                let previous = existing.clone();
-                *existing = host.clone();
-                BackendUpdate::Updated { previous, host }
-            }
-            None => {
-                backends.push(host.clone());
-                BackendUpdate::Added(host)
-            }
-        }
-    }
-
-    fn remove_backend(backends: &mut Vec<Host>, name: &str) -> Option<Host> {
-        let position = backends.iter().position(|backend| backend.name == name)?;
-        Some(backends.remove(position))
-    }
-
-    fn remove_stale_backends(backends: &mut Vec<Host>, seen: &HashSet<String>) -> usize {
-        let previous_len = backends.len();
-        backends.retain(|backend| seen.contains(&backend.name));
-        previous_len - backends.len()
-    }
-
-    fn log_backend_update(update: BackendUpdate, namespace: &str, service: &str, total: usize) {
-        match update {
-            BackendUpdate::Added(host) => info!(
+        for host in changes.added {
+            info!(
                 "Added backend: {} ({}) for service {}/{} (total: {})",
                 host.name, host.ip, namespace, service, total
-            ),
-            BackendUpdate::Updated { previous, host } => info!(
-                "Updated backend: {} ({} -> {}) for service {}/{} (total: {})",
-                host.name, previous.ip, host.ip, namespace, service, total
-            ),
-            BackendUpdate::Removed(host) => info!(
-                "Removed backend: {} ({}) for service {}/{} (not ready or terminating, total: {})",
-                host.name, host.ip, namespace, service, total
-            ),
-            BackendUpdate::Unchanged => {}
+            );
         }
     }
-}
 
-#[derive(Debug, PartialEq, Eq)]
-enum BackendUpdate {
-    Added(Host),
-    Updated { previous: Host, host: Host },
-    Removed(Host),
-    Unchanged,
+    fn apply_slice(
+        state: &mut EndpointSliceState,
+        slice: &EndpointSlice,
+        backends: &RwLock<Vec<Host>>,
+        namespace: &str,
+        service: &str,
+    ) {
+        match state.apply(slice) {
+            SliceApply::Unnamed => warn!(
+                "Ignoring unnamed EndpointSlice for service {}/{}",
+                namespace, service
+            ),
+            SliceApply::Deferred => {}
+            SliceApply::Publish(next) => {
+                Self::publish_backends(next, backends, namespace, service);
+            }
+        }
+    }
 }
 
 #[async_trait]
@@ -141,319 +88,153 @@ impl BackendProvider for KubernetesProvider {
             "Failed to create Kubernetes client - ensure running in cluster or kubeconfig is set",
         )?;
 
-        // Fetch the Service to get its selector
+        // Validate the configured Service and make the stricter XLB policy
+        // explicit when Kubernetes is configured to publish not-ready peers.
         let service_api: Api<Service> = Api::namespaced(client.clone(), &self.namespace);
-        let svc = service_api.get(&self.service).await.context(format!(
+        let service = service_api.get(&self.service).await.context(format!(
             "Failed to get service {}/{}",
             self.namespace, self.service
         ))?;
-
-        let selector = svc.spec.and_then(|spec| spec.selector).context(format!(
-            "Service {}/{} has no selector",
-            self.namespace, self.service
-        ))?;
-
-        if selector.is_empty() {
-            bail!(
-                "Service {}/{} has empty selector",
-                self.namespace,
-                self.service
+        let publishes_not_ready = service
+            .spec
+            .as_ref()
+            .and_then(|spec| spec.publish_not_ready_addresses)
+            .unwrap_or(false);
+        if publishes_not_ready {
+            info!(
+                "Service {}/{} publishes not-ready addresses; XLB will still require ready, serving, non-terminating endpoints for new flows",
+                self.namespace, self.service
             );
         }
 
-        // Build label selector string
-        let label_selector = selector
-            .iter()
-            .map(|(k, v)| format!("{}={}", k, v))
-            .collect::<Vec<_>>()
-            .join(",");
-
+        let label_selector = format!("{SERVICE_NAME_LABEL}={}", self.service);
         info!(
-            "Watching pods with selector '{}' for service {}/{}",
+            "Watching EndpointSlices with selector '{}' for service {}/{}",
             label_selector, self.namespace, self.service
         );
 
-        let pods_api: Api<Pod> = Api::namespaced(client, &self.namespace);
-
-        // Start watcher in background
+        let slices_api: Api<EndpointSlice> = Api::namespaced(client, &self.namespace);
         let backends = self.backends.clone();
         let namespace = self.namespace.clone();
         let service = self.service.clone();
+        let (initial_sync_tx, initial_sync_rx) = tokio::sync::oneshot::channel();
 
         let handle = tokio::spawn(async move {
-            let watch =
-                watcher::watcher(pods_api, watcher::Config::default().labels(&label_selector));
+            let watch = watcher::watcher(
+                slices_api,
+                watcher::Config::default().labels(&label_selector),
+            );
             futures::pin_mut!(watch);
-            let mut resync_seen: Option<HashSet<String>> = None;
+
+            let mut state = EndpointSliceState::default();
+            let mut initial_sync_tx = Some(initial_sync_tx);
 
             while let Some(event) = watch.next().await {
                 match event {
-                    Ok(event) => match event {
-                        Event::Apply(pod) => {
-                            let mut backend_list = backends.write().unwrap();
-                            let update = KubernetesProvider::reconcile_pod(&mut backend_list, &pod);
-                            KubernetesProvider::log_backend_update(
-                                update,
-                                &namespace,
-                                &service,
-                                backend_list.len(),
-                            );
-                        }
-                        Event::Init => {
-                            debug!(
-                                "Pod watch sync starting for service {}/{}",
-                                namespace, service
-                            );
-                            resync_seen = Some(HashSet::new());
-                        }
-                        Event::InitApply(pod) => {
-                            if let (Some(seen), Some(name)) =
-                                (&mut resync_seen, pod.metadata.name.as_ref())
-                            {
-                                seen.insert(name.clone());
-                            }
-
-                            let mut backend_list = backends.write().unwrap();
-                            let update = KubernetesProvider::reconcile_pod(&mut backend_list, &pod);
-                            KubernetesProvider::log_backend_update(
-                                update,
-                                &namespace,
-                                &service,
-                                backend_list.len(),
-                            );
-                        }
-                        Event::Delete(pod) => {
-                            if let Some(pod_name) = &pod.metadata.name {
-                                let mut backend_list = backends.write().unwrap();
-                                if let Some(removed) =
-                                    KubernetesProvider::remove_backend(&mut backend_list, pod_name)
-                                {
-                                    info!(
-                                        "Removed backend: {} ({}) for service {}/{} (total: {})",
-                                        removed.name,
-                                        removed.ip,
-                                        namespace,
-                                        service,
-                                        backend_list.len()
-                                    );
-                                }
-                            }
-                        }
-                        Event::InitDone => {
-                            if let Some(seen) = resync_seen.take() {
-                                let mut backend_list = backends.write().unwrap();
-                                let removed = KubernetesProvider::remove_stale_backends(
-                                    &mut backend_list,
-                                    &seen,
-                                );
-                                if removed > 0 {
-                                    info!(
-                                        "Removed {} stale backend(s) after pod watch sync for service {}/{} (total: {})",
-                                        removed,
-                                        namespace,
-                                        service,
-                                        backend_list.len()
-                                    );
-                                }
-                            }
-                            debug!(
-                                "Pod watch sync complete for service {}/{}",
-                                namespace, service
-                            );
-                        }
-                    },
-                    Err(e) => {
-                        warn!(
-                            "Pod watch error for service {}/{}: {}",
-                            namespace, service, e
-                        );
+                    Ok(Event::Apply(slice)) => {
+                        Self::apply_slice(&mut state, &slice, &backends, &namespace, &service)
                     }
+                    Ok(Event::Init) => {
+                        debug!(
+                            "EndpointSlice watch sync starting for service {}/{}",
+                            namespace, service
+                        );
+                        state.begin_sync();
+                    }
+                    Ok(Event::InitApply(slice)) => {
+                        Self::apply_slice(&mut state, &slice, &backends, &namespace, &service);
+                    }
+                    Ok(Event::Delete(slice)) => {
+                        if let Some(name) = slice.metadata.name.as_deref()
+                            && let Some(next) = state.remove(name)
+                        {
+                            Self::publish_backends(next, &backends, &namespace, &service);
+                        }
+                    }
+                    Ok(Event::InitDone) => {
+                        if let Some(completion) = state.finish_sync() {
+                            if completion.stale_slices > 0 {
+                                debug!(
+                                    "Removed {} stale EndpointSlice(s) after sync for service {}/{}",
+                                    completion.stale_slices, namespace, service
+                                );
+                            }
+                            Self::publish_backends(
+                                completion.backends,
+                                &backends,
+                                &namespace,
+                                &service,
+                            );
+                        }
+                        debug!(
+                            "EndpointSlice watch sync complete for service {}/{}",
+                            namespace, service
+                        );
+                        if let Some(tx) = initial_sync_tx.take() {
+                            let _ = tx.send(());
+                        }
+                    }
+                    Err(error) => warn!(
+                        "EndpointSlice watch error for service {}/{}: {}",
+                        namespace, service, error
+                    ),
                 }
             }
+
+            warn!(
+                "EndpointSlice watch ended unexpectedly for service {}/{}",
+                namespace, service
+            );
         });
 
-        *self.watch_handle.write().unwrap() = Some(handle);
+        match tokio::time::timeout(INITIAL_SYNC_TIMEOUT, initial_sync_rx).await {
+            Ok(Ok(())) => {}
+            Ok(Err(_)) => {
+                handle.abort();
+                bail!(
+                    "EndpointSlice watch ended before initial sync for service {}/{}",
+                    self.namespace,
+                    self.service
+                );
+            }
+            Err(_) => {
+                handle.abort();
+                bail!(
+                    "Timed out waiting for initial EndpointSlice sync for service {}/{}",
+                    self.namespace,
+                    self.service
+                );
+            }
+        }
+
+        *self
+            .watch_handle
+            .write()
+            .expect("watch handle lock poisoned") = Some(handle);
         info!(
-            "Started Kubernetes provider watching pods for {}/{}",
+            "Started Kubernetes provider watching EndpointSlices for {}/{}",
             self.namespace, self.service
         );
         Ok(())
     }
 
     fn get_backends(&self) -> Vec<Host> {
-        self.backends.read().unwrap().clone()
+        self.backends.read().expect("backend lock poisoned").clone()
     }
 
     async fn shutdown(&self) -> Result<()> {
-        if let Some(handle) = self.watch_handle.write().unwrap().take() {
+        if let Some(handle) = self
+            .watch_handle
+            .write()
+            .expect("watch handle lock poisoned")
+            .take()
+        {
             handle.abort();
             info!(
-                "Stopped Kubernetes provider watch for {}/{}",
+                "Stopped Kubernetes EndpointSlice watch for {}/{}",
                 self.namespace, self.service
             );
         }
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use k8s_openapi::api::core::v1::{PodCondition, PodIP, PodStatus};
-    use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
-    use kube::api::ObjectMeta;
-
-    fn pod(name: &str, ip: &str, ready: bool) -> Pod {
-        Pod {
-            metadata: ObjectMeta {
-                name: Some(name.into()),
-                ..Default::default()
-            },
-            status: Some(PodStatus {
-                pod_ip: Some(ip.into()),
-                conditions: Some(vec![PodCondition {
-                    type_: "Ready".into(),
-                    status: if ready { "True" } else { "False" }.into(),
-                    ..Default::default()
-                }]),
-                ..Default::default()
-            }),
-            ..Default::default()
-        }
-    }
-
-    fn host(name: &str, ip: &str) -> Host {
-        Host {
-            name: name.into(),
-            ip: ip.parse().expect("valid test IP"),
-        }
-    }
-
-    #[test]
-    fn ready_pod_is_eligible() {
-        assert!(KubernetesProvider::is_pod_ready(&pod(
-            "backend-1",
-            "10.0.0.1",
-            true
-        )));
-    }
-
-    #[test]
-    fn terminating_ready_pod_is_ineligible() {
-        let mut terminating = pod("backend-1", "10.0.0.1", true);
-        terminating.metadata.deletion_timestamp = Some(Time(
-            "2026-07-16T00:00:00Z"
-                .parse()
-                .expect("valid test timestamp"),
-        ));
-
-        assert!(!KubernetesProvider::is_pod_ready(&terminating));
-    }
-
-    #[test]
-    fn ipv6_pod_is_not_added_as_a_backend() {
-        let mut backends = Vec::new();
-
-        let update = KubernetesProvider::reconcile_pod(
-            &mut backends,
-            &pod("backend-v6", "2001:db8::20", true),
-        );
-
-        assert_eq!(update, BackendUpdate::Unchanged);
-        assert!(backends.is_empty());
-    }
-
-    #[test]
-    fn ipv6_pod_update_removes_an_existing_ipv4_backend() {
-        let existing = host("backend-1", "10.0.0.1");
-        let mut backends = vec![existing.clone()];
-
-        let update = KubernetesProvider::reconcile_pod(
-            &mut backends,
-            &pod("backend-1", "2001:db8::20", true),
-        );
-
-        assert_eq!(update, BackendUpdate::Removed(existing));
-        assert!(backends.is_empty());
-    }
-
-    #[test]
-    fn dual_stack_pod_uses_ipv4_when_ipv6_is_primary() {
-        let mut dual_stack = pod("backend-dual", "2001:db8::20", true);
-        dual_stack
-            .status
-            .as_mut()
-            .expect("pod helper provides status")
-            .pod_ips = Some(vec![
-            PodIP {
-                ip: "2001:db8::20".into(),
-            },
-            PodIP {
-                ip: "10.0.0.20".into(),
-            },
-        ]);
-        let mut backends = Vec::new();
-
-        let update = KubernetesProvider::reconcile_pod(&mut backends, &dual_stack);
-
-        assert_eq!(
-            update,
-            BackendUpdate::Added(host("backend-dual", "10.0.0.20"))
-        );
-        assert_eq!(backends, vec![host("backend-dual", "10.0.0.20")]);
-    }
-
-    #[test]
-    fn reconcile_removes_terminating_backend() {
-        let mut backends = vec![host("backend-1", "10.0.0.1")];
-        let mut terminating = pod("backend-1", "10.0.0.1", true);
-        terminating.metadata.deletion_timestamp = Some(Time(
-            "2026-07-16T00:00:00Z"
-                .parse()
-                .expect("valid test timestamp"),
-        ));
-
-        let update = KubernetesProvider::reconcile_pod(&mut backends, &terminating);
-
-        assert_eq!(
-            update,
-            BackendUpdate::Removed(host("backend-1", "10.0.0.1"))
-        );
-        assert!(backends.is_empty());
-    }
-
-    #[test]
-    fn reconcile_updates_backend_ip_by_pod_name() {
-        let mut backends = vec![host("backend-1", "10.0.0.1")];
-
-        let update =
-            KubernetesProvider::reconcile_pod(&mut backends, &pod("backend-1", "10.0.0.9", true));
-
-        assert_eq!(
-            update,
-            BackendUpdate::Updated {
-                previous: host("backend-1", "10.0.0.1"),
-                host: host("backend-1", "10.0.0.9"),
-            }
-        );
-        assert_eq!(backends, vec![host("backend-1", "10.0.0.9")]);
-    }
-
-    #[test]
-    fn resync_removes_backends_not_seen_in_snapshot() {
-        let mut backends = vec![
-            host("backend-1", "10.0.0.1"),
-            host("backend-2", "10.0.0.2"),
-            host("backend-3", "10.0.0.3"),
-        ];
-        let seen = HashSet::from(["backend-1".into(), "backend-3".into()]);
-
-        let removed = KubernetesProvider::remove_stale_backends(&mut backends, &seen);
-
-        assert_eq!(removed, 1);
-        assert_eq!(
-            backends,
-            vec![host("backend-1", "10.0.0.1"), host("backend-3", "10.0.0.3"),]
-        );
     }
 }

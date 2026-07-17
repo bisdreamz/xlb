@@ -11,9 +11,9 @@ rules:
   resources: ["services"]
   resourceNames: [{{ .Values.config.provider.kubernetes.service | quote }}]
   verbs: ["get"]
-- apiGroups: [""]
-  resources: ["pods"]
-  verbs: ["list", "watch"]
+- apiGroups: ["discovery.k8s.io"]
+  resources: ["endpointslices"]
+  verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

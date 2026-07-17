@@ -6,7 +6,7 @@ Deploy XLB on Kubernetes using Helm for high-performance Layer 4 load balancing 
 
 ## Prerequisites
 
-- Kubernetes 1.20+
+- Kubernetes 1.26+
 - Nodes with XDP-capable network drivers
 - Helm 3.0+
 - ExternalDNS (optional, for automatic DNS management)
@@ -30,7 +30,8 @@ helm install xlb ./helm/xlb \
 
 ### Backend Discovery
 
-XLB reads the configured Service selector and watches matching Pods:
+XLB validates the configured Service and watches every associated EndpointSlice selected by the
+standard `kubernetes.io/service-name` label:
 
 ```yaml
 # values.yaml
@@ -41,9 +42,12 @@ config:
       service: backend-service
 ```
 
-After the required `kube-watcher-hygiene` update, new flows are assigned only to matching Pods that
-are Ready and not terminating. Established flows remain pinned to their selected backend while it
-drains. Deploy that code update together with this documentation.
+New flows are assigned only to IPv4 endpoints that are Ready, serving, and not terminating.
+EndpointSlice relists are applied as complete snapshots so stale slices are removed without exposing
+a partial backend set. Established flows remain pinned to their selected backend while it drains.
+
+The chart grants `services:get` and `endpointslices:get,list,watch` in the configured backend
+namespace. It does not require Pod watch permission.
 
 ### Port Mapping
 

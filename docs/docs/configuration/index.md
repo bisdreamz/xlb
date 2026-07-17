@@ -114,7 +114,7 @@ provider:
 
 #### Kubernetes Provider
 
-Dynamic backend discovery using Ready Pods selected by a Kubernetes Service:
+Dynamic backend discovery using EndpointSlices associated with a Kubernetes Service:
 
 ```yaml
 provider:
@@ -123,8 +123,13 @@ provider:
     service: my-service
 ```
 
-XLB watches Pods matching the Service selector and automatically updates
-backends as their Ready condition and replica count change.
+XLB watches every IPv4 EndpointSlice labeled for the Service and merges them into one backend set.
+New flows use only endpoints that are ready, serving, and not terminating. Established flows remain
+pinned to their selected backend while it drains or disappears from discovery.
+
+EndpointSlice conditions are nullable. XLB treats `ready: null` and `serving: null` as true, and
+`terminating: null` as false. XLB keeps this strict readiness policy even when the Service enables
+`publishNotReadyAddresses`.
 
 ### Routing Mode
 

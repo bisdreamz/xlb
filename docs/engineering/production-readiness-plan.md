@@ -469,13 +469,18 @@ retaining the 300-second safety floor.
 
 ### Current state
 
-- XLB has a custom Pod watcher in `xlb/src/provider/kubernetes.rs`.
+- XLB's `endpoint-slice-discovery` branch replaces its custom Pod watcher with a direct
+  `discovery.k8s.io/v1` EndpointSlice watcher.
 - `neuronictechnologies/rust-ad-exchange-ai` (local checkout
   `../neuronicai/rust-ad-exchange-ai`) uses the adjacent `../kube-discovery` crate.
 - `kube-discovery` also watches Pods selected from a Service; it does not use
   EndpointSlices today.
 - `kube-discovery` uses `kube 0.98` / `k8s-openapi 0.24` while XLB uses
   `kube 2.0` / `k8s-openapi 0.26`.
+- `kube-discovery` is currently an unversioned sibling path crate with no Git remote and multiple
+  live checkout consumers. XLB's standalone Docker build context also cannot include a
+  `../kube-discovery` path dependency. Productizing and migrating that shared crate is therefore a
+  separate cross-repository release rather than part of XLB's focused migration.
 - Before the `kube-watcher-hygiene` branch, Helm granted core `endpoints` and
   `services` while XLB actually watched `pods`, so chart-created service
   accounts could fail discovery with an authorization error.
@@ -498,7 +503,24 @@ Keep this work separate from EndpointSlice migration. The focused
 This branch changes eligibility for new connections only. It does not reset or
 remove established flows when a Pod becomes terminating or NotReady.
 
-### Target shared design
+### XLB EndpointSlice migration
+
+The focused XLB branch:
+
+- Validates the configured Service and lists/watches all EndpointSlices labeled
+  `kubernetes.io/service-name=<service>`.
+- Merges every IPv4 slice, deduplicates overlapping endpoint addresses conservatively, and publishes
+  initial/relist snapshots atomically at `InitDone`.
+- Retains nullable endpoint name, node, zone, Ready, serving, and terminating values internally.
+- Assigns new flows only when normalized Ready and serving are true and terminating is false.
+- Leaves established flows untouched when an endpoint becomes ineligible or disappears.
+- Replaces Pod RBAC with namespace-scoped EndpointSlice RBAC.
+
+XLB supports Kubernetes 1.26 and later. Normalize `ready: null` and `serving: null` as true, and
+`terminating: null` as false. Requiring both Ready and serving preserves XLB's existing strict drain
+behavior when a Service sets `publishNotReadyAddresses`.
+
+### Future shared design
 
 Upgrade and generalize `kube-discovery` around a lower-level EndpointSlice
 service watcher that emits a neutral endpoint model:
@@ -532,20 +554,18 @@ Consumers:
 - XLB uses eligible endpoints for new-flow backend selection and retains
   condition/reason data for status output.
 
-Preserve the nullable EndpointSlice values at the shared-library boundary and
-normalize them explicitly: `ready: null` and `serving: null` mean true, while
-`terminating: null` means false. Do not silently map `None` to false.
+Preserve the nullable EndpointSlice values at the shared-library boundary. Consumer policy must
+normalize them explicitly rather than silently mapping `None` to false.
 
 `publishNotReadyAddresses` can cause the API to report `ready=true` for
 endpoints that are not Pod-Ready. Before migrating XLB, decide explicitly
 whether new-flow eligibility follows Service publishing policy or preserves
-today's stricter drain behavior. The initial recommendation for XLB is
-`serving && !terminating`; retain `ready` separately for status and policy.
+today's stricter drain behavior. XLB chooses the stricter
+`ready && serving && !terminating` policy.
 
 Normalized EndpointSlice conditions then mean:
 
-- `serving && !terminating`: eligible for new connections under the recommended
-  strict XLB policy.
+- `ready && serving && !terminating`: eligible for new connections under XLB's strict policy.
 - `terminating && serving`: not eligible for new connections, but visible as
   draining; existing XLB flows remain untouched.
 - not serving/removed: not eligible; existing flows remain until the endpoint
@@ -904,7 +924,7 @@ next branch. Do not mix opportunistic cleanup into a TCP correctness branch.
 | 14 | `rust-module-cleanup-07-2026` | Extract pair cleanup and tests from `mloop.rs`, without behavior changes | Implemented and independently reviewed |
 | 15 | `rust-tooling-cleanup-07-2026` | Userspace Clippy baseline, stable rustfmt configuration, and test-runner documentation | Implemented and independently reviewed |
 | 16 | `xlb-resource-utilization` | Host/process CPU, attached-NIC bandwidth, flow-map pressure, and maximum utilization metric | Implemented and independently reviewed |
-| 17 | `endpoint-slice-discovery` | Shared nullable-condition model and both consumers | Planned |
+| 17 | `endpoint-slice-discovery` | XLB EndpointSlice merge, strict eligibility, relist behavior, and RBAC | Implemented and independently reviewed |
 | 18 | `status-health-api` | `StatusSnapshot`, `/healthz`, `/readyz`, JSON and mini status page | Planned |
 | 19 | `backend-health-checks` | Static checks and optional Kubernetes secondary checks | Planned |
 | 20 | `observability-packaging` | Latency, Collector, Prometheus, Grafana, and alerts | Planned |

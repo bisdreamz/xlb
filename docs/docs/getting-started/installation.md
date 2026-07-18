@@ -1,50 +1,56 @@
-# Installation
+# Choose a deployment
 
-## Prerequisites
-
-- Linux kernel 5.10+
-- XDP-capable network driver (i40e, ixgbe, mlx5, virtio_net)
+XLB supports two deployment paths. Choose the guide for the environment where packets will enter
+the load balancer; Kubernetes and bare-metal host preparation are intentionally documented
+separately.
 
 ## Kubernetes
 
-**Coming Soon** - Helm chart distribution in progress.
+Use the supplied Helm chart. It configures the host networking, privileged access, BPF filesystem
+mounts, health probes, and EndpointSlice RBAC that XLB needs.
 
-Contact emaczura@neuronic.dev for early access.
+The two essential placement settings are:
 
-## Docker
+- `hostNetwork: true`, so XLB can attach to the node's real network interface; and
+- required Pod anti-affinity, so at most one XLB Pod from the release runs on each node.
 
-```bash
-docker run --privileged --network=host --stop-timeout 20 \
-  --mount type=bind,source="$(pwd)/xlb.yaml",target=/app/xlb.yaml,readonly \
-  emaczura/xlb:0.1.0
-```
+Do not remove either setting. Select enough eligible nodes for the requested replica count, then
+let the chart discover ready, serving, non-terminating endpoints from the configured backend
+Service.
 
-**Required flags:**
-- `--privileged` - eBPF/XDP requires privileged access
-- `--network=host` - XDP requires direct network interface access
-- `--stop-timeout` - Must exceed the configured `shutdown_timeout` so XLB can drain cleanly
-- `--mount` - Supplies the required deployment-specific configuration; it is not baked into the image
+[Start on Kubernetes](kubernetes.md)
 
-## Configuration
+## Bare metal, virtual machines, or Docker
 
-Create `xlb.yaml`:
+Use the container with host networking and prepare the Linux host explicitly. This path requires a
+non-loopback interface, routes to the backends, and sufficient privileges to load eBPF and attach
+XDP.
 
-```yaml
-proto: tcp
-listen: auto
-ports:
-  - local_port: 80
-    remote_port: 8080
-provider:
-  static:
-    backends:
-      - name: backend-1
-        ip: 10.0.1.10
-```
+[Start on bare metal](quickstart.md)
 
-See [Configuration Overview](../configuration/index.md) for all options.
+## Common requirements
 
-## Next Steps
+Both deployment paths require:
 
-- [Quick Start Guide](quickstart.md)
-- [Kubernetes Deployment](../deployment/kubernetes.md)
+- Linux kernel 5.10 or newer;
+- IPv4 connectivity from the XLB node or host to every backend;
+- administrative access sufficient to load eBPF and attach XDP; and
+- enough CPU, memory, and NIC capacity for the intended traffic profile.
+
+Native XDP support is recommended. XLB automatically falls back to generic/SKB XDP when native
+attachment is unavailable, but the two modes have different performance characteristics.
+
+## Obtain the release artifacts
+
+Your Neuronic support representative will provide the image details, registry access when required,
+matching Helm chart for Kubernetes, and release-specific notes. Each deployment guide explains how
+to supply those artifacts without embedding registry credentials in XLB configuration.
+
+## Next steps
+
+- [Kubernetes quick start](kubernetes.md)
+- [Bare-metal quick start](quickstart.md)
+- [Configuration overview](../configuration/index.md)
+- [Understand the packet path](../architecture.md)
+- [Open the admin console](../operations/admin-console.md)
+- [Troubleshoot startup](../operations/troubleshooting.md)

@@ -1,20 +1,22 @@
 site_name: XLB Documentation
 site_url: https://docs.runxlb.com
-site_description: eBPF-powered Layer 4 Load Balancer
+site_description: XDP-native IPv4/TCP Layer 4 load balancer
 site_author: Neuronic
 
 theme:
   name: material
+  logo: assets/xlb-mark.svg
+  favicon: assets/xlb-mark.svg
   palette:
     - scheme: default
-      primary: indigo
-      accent: indigo
+      primary: custom
+      accent: custom
       toggle:
         icon: material/brightness-7
         name: Switch to dark mode
     - scheme: slate
-      primary: indigo
-      accent: indigo
+      primary: custom
+      accent: custom
       toggle:
         icon: material/brightness-4
         name: Switch to light mode
@@ -27,17 +29,27 @@ theme:
     - search.highlight
     - content.code.copy
 
+extra_css:
+  - stylesheets/extra.css
+
 nav:
-  - Home: index.md
+  - Overview: index.md
   - Getting Started:
-    - Installation: getting-started/installation.md
-    - Quick Start: getting-started/quickstart.md
+    - Deployment Options: getting-started/installation.md
+    - Kubernetes Quick Start: getting-started/kubernetes.md
+    - Bare Metal Quick Start: getting-started/quickstart.md
+  - Architecture: architecture.md
   - Configuration:
     - Overview: configuration/index.md
     - Reference: configuration/reference.md
   - Deployment:
-    - Kubernetes: deployment/kubernetes.md
+    - Kubernetes Guide: deployment/kubernetes.md
     - Helm Chart: deployment/helm.md
+  - Operations:
+    - Admin Console: operations/admin-console.md
+    - Observability: operations/observability.md
+    - Connections and Upgrades: operations/connection-lifecycle.md
+    - Troubleshooting: operations/troubleshooting.md
   - runxlb.com: https://runxlb.com
 
 markdown_extensions:

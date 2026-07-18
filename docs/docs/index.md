@@ -1,101 +1,95 @@
-# XLB - High-Performance Load Balancer
+# XLB documentation
 
-XLB is an IPv4/TCP Layer 4 load balancer that routes packets at the network layer instead of terminating and re-establishing connections like traditional reverse proxies (HAProxy, Nginx).
+XLB is a commercially supported, XDP-native IPv4/TCP Layer 4 load balancer for high-volume
+services. It forwards packets in the Linux kernel instead of terminating the client connection and
+creating a second proxy-owned connection to the backend.
 
-**How it works:**
-Traditional load balancers act as reverse proxies - they accept your client's connection, then open a separate connection to your backend. This creates overhead: connection setup/teardown, data copying, context switching.
+XLB is designed for workloads where packet rate, connection volume, infrastructure cost, and
+operational simplicity matter more than Layer 7 features. Common deployments include OpenRTB and
+other latency-sensitive APIs, game infrastructure, and high-throughput TCP services.
 
-XLB forwards packets directly by rewriting IP addresses and ports in the kernel. Your client's TCP connection flows end-to-end to the backend through XLB - one connection, not two.
+## Supported product scope
 
-This architecture avoids TCP termination and userspace packet copying in the load-balancing path.
-Its performance still depends on the NIC, kernel, packet mix, connection churn, and whether native
-driver XDP is available.
+| Area | Current behavior |
+| --- | --- |
+| Network protocol | IPv4/TCP |
+| Forwarding mode | Bidirectional NAT |
+| Backend selection | Round robin for new connections; existing connections remain pinned |
+| Backend discovery | Static IPv4 addresses or Kubernetes EndpointSlices |
+| XDP attachment | Native driver mode when available; generic/SKB fallback |
+| Deployment | Linux hosts, virtual machines, and Kubernetes |
+| Operations | Embedded admin console, health/readiness API, and OpenTelemetry metrics |
+| Application traffic | Passed through without TLS termination or HTTP inspection |
 
-## Performance
+UDP, IPv6 balancing, DSR, TLS termination, and Layer 7 routing are not currently implemented.
+Unrelated traffic is passed to the host network stack.
 
-XLB is built for native-driver XDP packet processing, with generic/SKB XDP as a compatibility
-fallback. Reproducible benchmark results and comparison methodology have not yet been published, so
-capacity should be established with the intended hardware and OpenRTB traffic profile.
+## Why the packet path is different
 
-## Current Features
+A traditional reverse proxy accepts the client TCP connection, opens another connection to a
+backend, and copies data between the two. XLB instead creates a pair of kernel-resident rewrite
+recipes for each accepted connection and forwards packets directly between the client and selected
+backend.
 
-- **TCP load balancing** (IPv4 only - UDP and IPv6 coming later)
-- **Packet forwarding** - Direct end-to-end connections, not reverse proxy
-- **Static backends** - Configure fixed backend IPs
-- **Kubernetes discovery** - Automatic backend updates from K8s services
-- **Reactive shutdown** - Reset matching traffic that arrives during a termination grace window
-- **OpenTelemetry metrics** - Export stats to your monitoring system
+This removes proxy-owned sockets and userspace packet copies from the load-balancing path. Actual
+capacity still depends on the NIC, driver, kernel, packet sizes, connection churn, and whether the
+host supports native XDP. Validate production capacity with representative traffic and hardware.
 
-## What XLB Doesn't Do
+[Read the architecture guide](architecture.md)
 
-- **No Layer 7** - No HTTP parsing, routing, or header inspection
-- **No TLS termination** - Pass-through only
-- **No request routing** - No path-based or host-based routing
-- **No caching** - Pure packet forwarding
+## Choose a deployment
 
-If you need HTTP features, use Nginx, HAProxy, or Envoy behind XLB.
+<div class="grid cards" markdown>
 
-## Requirements
+-   **Kubernetes quick start**
 
-- Linux kernel 5.10+
-- XDP-capable network driver (i40e, ixgbe, mlx5, virtio_net)
-- 2-4 CPU cores
-- 256MB+ RAM
+    ---
 
-## Scaling
+    Deploy the supplied Helm chart on host-networked nodes. XLB discovers ready backends from the
+    configured Service's EndpointSlices.
 
-XLB scales horizontally through multiple instances with DNS round-robin:
+    [Start on Kubernetes](getting-started/kubernetes.md)
 
-- Deploy multiple XLB instances across different nodes
-- Configure DNS A records pointing to all instance IPs
-- Clients are distributed across instances via DNS
-- Each instance handles independent subset of connections
+-   **Bare metal quick start**
 
-Example: 3 XLB instances with multiple DNS A records:
-```
-lb.example.com → 10.0.1.10
-lb.example.com → 10.0.1.11
-lb.example.com → 10.0.1.12
-```
+    ---
 
-On Kubernetes, ExternalDNS can manage a record for the XLB Service's load-balancer address.
+    Run the supplied container on a Linux host or virtual machine using host networking and static
+    backend addresses.
 
-## Use Cases
+    [Start on bare metal](getting-started/quickstart.md)
 
-**When to use XLB:**
+</div>
 
-- Cost-effective alternative to expensive cloud provider NLBs (AWS NLB, GCP Network Load Balancer)
-- Portable L4 load balancing across clouds, on-prem, and bare metal
-- High packet-rate services where avoiding TCP termination and userspace packet copies is valuable
-- Latency-sensitive systems that can validate XLB against their own packet and connection profile
-- Simple L4 forwarding without the operational complexity of HAProxy/NGINX
+[Compare the deployment paths](getting-started/installation.md)
 
-**When NOT to use XLB:**
+## Operate XLB
 
-- You need L7 features (HTTP routing, TLS termination, header manipulation, caching)
+- [Admin console](operations/admin-console.md): instance health, traffic, connections, backends,
+  XDP attachment mode, and resource pressure.
+- [Observability](operations/observability.md): OpenTelemetry metric names, labels, resource
+  attributes, and alerting guidance.
+- [Connections and upgrades](operations/connection-lifecycle.md): backend selection, idle cleanup,
+  graceful shutdown, and deployment changes.
+- [Troubleshooting](operations/troubleshooting.md): startup, attachment, routing, discovery,
+  readiness, and metric failures.
 
-## Quick Start
+## Common requirements and boundaries
 
-```yaml
-# xlb.yaml - Static deployment example
-proto: tcp
-listen: auto
-ports:
-  - local_port: 80
-    remote_port: 8080
-provider:
-  static:
-    backends:
-      - name: backend-1
-        ip: 10.0.1.10
-      - name: backend-2
-        ip: 10.0.1.11
-```
+- Linux kernel 5.10 or newer.
+- Administrative access sufficient to load eBPF programs, attach XDP, and use host networking.
+- Routable IPv4 backend addresses. Loopback backends cannot be reached through the XDP packet path.
+- At least one non-loopback interface on which XDP can attach.
 
-```bash
-docker run --privileged --network=host --stop-timeout 20 \
-  --mount type=bind,source="$(pwd)/xlb.yaml",target=/app/xlb.yaml,readonly \
-  emaczura/xlb:0.1.0
-```
+Native-driver XDP provides the intended fast path. XLB falls back to generic/SKB XDP when the
+driver cannot attach natively and reports the selected mode in logs, the status API, and the admin
+console.
 
-See [Installation Guide](getting-started/installation.md) for details.
+## Image and release access
+
+Your Neuronic support representative will provide the container image reference, immutable release
+identifier, registry credentials when required, and the matching Helm artifact. Production
+deployments should use the supplied immutable image reference.
+
+Visit [runxlb.com](https://runxlb.com) to request an evaluation or contact your support
+representative for deployment-specific guidance.

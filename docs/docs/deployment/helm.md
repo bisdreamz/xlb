@@ -1,97 +1,72 @@
-# Helm Chart Reference
+# Helm chart reference
 
-> **⚠️ IN PROGRESS** - Helm chart distribution is in development. For early access, contact emaczura@neuronic.dev
+The XLB chart creates a host-networked Deployment, Service, ServiceAccount, configuration ConfigMap,
+and—when Kubernetes discovery is selected—namespace-scoped RBAC for the configured backend Service
+and EndpointSlices.
 
-Complete reference for XLB Helm chart configuration.
+Your Neuronic support representative will provide the chart and matching container-image details for
+the approved release.
 
-## Installation
-
-```bash
-# Clone repository to get Helm chart
-git clone <repository-url>
-cd xlb
-
-helm install xlb ./helm/xlb -n xlb --create-namespace
-```
-
-From custom values:
+## Install or upgrade
 
 ```bash
-helm install xlb ./helm/xlb -f custom-values.yaml -n xlb --create-namespace
+export XLB_CHART='<path to supplied XLB chart>'
+
+helm upgrade --install xlb "$XLB_CHART" \
+  --namespace xlb \
+  --create-namespace \
+  --values xlb-values.yaml
 ```
 
-## Values Reference
+Validate custom values before applying them:
 
-### Image Configuration
+```bash
+helm lint "$XLB_CHART" -f xlb-values.yaml
+helm template xlb "$XLB_CHART" -n xlb -f xlb-values.yaml >/dev/null
+```
+
+## Image
+
+Use the repository and immutable digest supplied for the release:
 
 ```yaml
 image:
-  repository: emaczura/xlb
+  repository: "<provided repository>"
+  digest: "<provided immutable digest>"
   pullPolicy: IfNotPresent
-  tag: "" # Defaults to Chart.appVersion
-  digest: "" # Prefer an immutable sha256:... digest in production
 
-imagePullSecrets: []
+imagePullSecrets:
+  - name: xlb-registry
 ```
 
-When `digest` is set, the chart deploys `repository@digest` and ignores `tag`.
+When `image.digest` is non-empty, the chart deploys `repository@digest`. Production releases should
+use the provided digest. Omit `imagePullSecrets` for a public image.
 
-### Deployment Configuration
+Create private-registry credentials separately; never place their values directly in the Helm file:
 
-```yaml
-replicaCount: 2 # Number of XLB instances
-
-terminationGracePeriodSeconds: 90 # Must be > shutdown_timeout
+```bash
+kubectl create secret docker-registry xlb-registry \
+  --namespace xlb \
+  --docker-server='<registry host>' \
+  --docker-username='<provided username>' \
+  --docker-password='<provided pull credential>'
 ```
 
-### Service Account
+## Deployment and placement
 
 ```yaml
-serviceAccount:
-  create: true
-  annotations: {}
-  name: "" # Defaults to release name
-```
+replicaCount: 2
+terminationGracePeriodSeconds: 90
 
-### Security Context
-
-```yaml
-securityContext:
-  capabilities:
-    add:
-      - NET_ADMIN # Required for XDP
-      - SYS_ADMIN # Required for eBPF
-      - BPF # Required for eBPF maps
-  privileged: true
-```
-
-### Service Configuration
-
-```yaml
-service:
-  type: LoadBalancer
-  annotations:
-    external-dns.alpha.kubernetes.io/hostname: lb.example.com
-    external-dns.alpha.kubernetes.io/ttl: "60"
-```
-
-### Resources
-
-```yaml
 resources:
-  limits:
-    cpu: 4000m
-    memory: 512Mi
   requests:
     cpu: 2000m
     memory: 256Mi
-```
+  limits:
+    cpu: 4000m
+    memory: 512Mi
 
-### Node Scheduling
-
-```yaml
 nodeSelector: {}
-
 tolerations: []
 
 affinity:
@@ -101,20 +76,87 @@ affinity:
           matchExpressions:
             - key: app.kubernetes.io/name
               operator: In
-              values:
-                - xlb
+              values: [xlb]
         topologyKey: kubernetes.io/hostname
 ```
 
-### XLB Configuration
+The required anti-affinity permits one XLB Pod from the release per node. Ensure the cluster has at
+least one eligible node per replica.
 
-All values under `config` are used to generate `xlb.yaml`:
+The chart uses Deployment strategy `Recreate`. Kubernetes removes the old Pods before creating new
+ones during an upgrade. See [Connections and upgrades](../operations/connection-lifecycle.md) before
+changing a production release.
+
+## Security context and host access
+
+```yaml
+securityContext:
+  capabilities:
+    add:
+      - NET_ADMIN
+      - SYS_ADMIN
+      - BPF
+  privileged: true
+```
+
+The chart also sets `hostNetwork: true`, mounts `/sys/fs/bpf` and `/sys/kernel/debug` from the host,
+and runs the current container as root. These permissions are required by the current loader and XDP
+deployment model. Review node isolation and admission policy accordingly.
+
+## Service exposure
+
+The chart defaults are:
+
+```yaml
+service:
+  type: LoadBalancer
+  annotations: {}
+
+externalDNS:
+  enabled: true
+  ttl: 60
+```
+
+Choose the Service type deliberately:
+
+- `ClusterIP` works with direct node DNS/routing and avoids asking Kubernetes to provision another
+  managed load balancer.
+- `LoadBalancer` delegates external exposure to the cloud provider and can retain a managed
+  load-balancer layer in front of XLB.
+
+Override the defaults with `service.type: ClusterIP` and normally `externalDNS.enabled: false` for a
+direct node-address deployment.
+
+When `externalDNS.enabled` is true, the chart adds the configured TTL annotation. Add the provider's
+hostname annotation under `service.annotations` when using a Service-based ExternalDNS source.
+
+## Service account and RBAC
+
+```yaml
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+```
+
+With Kubernetes discovery and `create: true`, the chart grants the generated account:
+
+- `get` on the configured backend Service;
+- `get`, `list`, and `watch` on EndpointSlices in the backend namespace.
+
+When `create: false`, set `serviceAccount.name` and create equivalent RBAC yourself. The chart does
+not create its Role or RoleBinding in that mode.
+
+## XLB configuration
+
+Values under `config` generate `/app/xlb.yaml`:
 
 ```yaml
 config:
-  name: "" # Optional service name for metrics
+  name: production-lb
   listen: auto
   proto: tcp
+  mode: nat
 
   ports:
     - local_port: 80
@@ -122,10 +164,9 @@ config:
 
   provider:
     kubernetes:
-      namespace: default
+      namespace: application
       service: backend-service
 
-  mode: nat
   orphan_ttl_secs: 300
   shutdown_timeout: 60
 
@@ -138,7 +179,6 @@ config:
       existingSecret: ""
       passwordKey: password
 
-  # Set this when a cloud/virtual NIC reports an unknown link speed.
   resources:
     network_capacity_mbps: null
 
@@ -150,15 +190,56 @@ config:
     headers: {}
 ```
 
-See [Configuration Reference](../configuration/reference.md) for detailed field documentation.
+`config.name` defaults to `xlb` when empty. The supported values are IPv4/TCP and NAT; UDP, DSR,
+and IPv6 load balancing are rejected or ignored by the current implementation.
 
-To enable HTTP Basic auth without placing the password in Helm values, create a Secret and reference
-it from the chart:
+See the [configuration overview](../configuration/index.md) and generated
+[configuration reference](../configuration/reference.md) for field semantics.
+
+## Static backends
+
+The chart's default values contain the Kubernetes provider. A separate override file must explicitly
+clear it before selecting static discovery:
+
+```yaml
+config:
+  provider:
+    kubernetes: null
+    static:
+      backends:
+        - name: backend-1
+          ip: 10.0.1.10
+        - name: backend-2
+          ip: 10.0.1.11
+```
+
+Static backend changes restart the Deployment through the configuration checksum.
+
+## Port mappings
+
+```yaml
+config:
+  ports:
+    - local_port: 80
+      remote_port: 8080
+    - local_port: 443
+      remote_port: 8443
+```
+
+XLB requires one through eight mappings. The Service exposes each `local_port`; the backend receives
+traffic at its corresponding `remote_port`.
+
+## Admin authentication
+
+Create a Secret first:
 
 ```bash
 kubectl create secret generic xlb-admin-auth \
-  --from-literal=password='replace-with-a-strong-password'
+  --namespace xlb \
+  --from-literal=password='<strong password>'
 ```
+
+Then reference its name and key:
 
 ```yaml
 config:
@@ -172,113 +253,83 @@ config:
       passwordKey: password
 ```
 
-This protects the administrative UI and status API but intentionally leaves health probes open.
-Provide TLS or another secure transport before exposing Basic auth outside a trusted management
-network.
+When auth is enabled, `existingSecret`, `passwordKey`, and a non-empty username are required. The
+chart injects the Secret value as `XLB_ADMIN_PASSWORD`; it does not place the password in the
+ConfigMap.
 
-### Health Probes
+Basic auth protects the console and status API, while health/readiness probes stay open. Add TLS or
+another secure transport before exposing the HTTP listener outside a trusted network.
 
-By default, the chart derives HTTP probes from `config.admin`:
+[Admin console and status API](../operations/admin-console.md)
 
-```yaml
-startupProbe:
-  httpGet:
-    host: 127.0.0.1
-    path: /healthz
-    port: 9090
-    scheme: HTTP
-  periodSeconds: 2
-  timeoutSeconds: 1
-  failureThreshold: 30
+## Health probes
 
-readinessProbe:
-  httpGet:
-    host: 127.0.0.1
-    path: /readyz
-    port: 9090
-    scheme: HTTP
-  initialDelaySeconds: 5
-  periodSeconds: 1
-  timeoutSeconds: 1
-  failureThreshold: 3
-
-livenessProbe:
-  httpGet:
-    host: 127.0.0.1
-    path: /healthz
-    port: 9090
-    scheme: HTTP
-  initialDelaySeconds: 10
-  periodSeconds: 10
-  timeoutSeconds: 3
-  failureThreshold: 3
-```
-
-The startup probe allows 60 seconds for the initial Kubernetes discovery sync and XDP attachment;
-Kubernetes delays liveness and readiness checks until it succeeds. Set `startupProbe`,
-`readinessProbe`, or `livenessProbe` to a complete custom probe object to override a default.
-
-### Environment Variables
+Empty probe values enable the chart defaults:
 
 ```yaml
-env:
-  RUST_LOG: "info" # Set to "debug" for verbose logging
+startupProbe: {}
+readinessProbe: {}
+livenessProbe: {}
 ```
 
-## Common Configurations
+The generated probes are:
 
-### Static Backends
+| Probe | Path | Default behavior |
+| --- | --- | --- |
+| Startup | `/healthz` | Every 2 seconds, 30 failures allowed |
+| Readiness | `/readyz` | Every second, 3 failures allowed |
+| Liveness | `/healthz` | Every 10 seconds, 3 failures allowed |
+
+The startup probe delays liveness and readiness until initial provider discovery and process startup
+complete. Supply a complete Kubernetes probe object under the corresponding value to replace a
+default.
+
+## Resource capacity
+
+Physical NIC speed is normally discovered from the host. Configure a capacity override for a cloud
+or virtual interface that reports unknown speed:
 
 ```yaml
 config:
-  provider:
-    static:
-      backends:
-        - name: backend-1
-          ip: 10.0.1.10
-        - name: backend-2
-          ip: 10.0.1.11
+  resources:
+    network_capacity_mbps: 2000
 ```
 
-### Multiple Port Mappings
+The value is per attached interface. It supplies only the denominator for network utilization; XLB
+still measures the live interface byte counters.
+
+## OpenTelemetry
 
 ```yaml
 config:
-  ports:
-    - local_port: 80
-      remote_port: 8080
-    - local_port: 443
-      remote_port: 8443
-    - local_port: 8080
-      remote_port: 9090
-```
-
-Maximum: 8 port mappings
-
-### Production Metrics
-
-```yaml
-config:
-  name: production-lb
   otel:
     enabled: true
     endpoint: "http://opentelemetry-collector.monitoring:4317"
     protocol: grpc
     export_interval_secs: 10
+    headers: {}
 ```
 
-## Upgrade
+The current chart writes headers to the ConfigMap. Do not store sensitive collector credentials in
+ordinary values without an appropriate secret-management layer.
 
-```bash
-# Upgrade with new values
-helm upgrade xlb ./helm/xlb -n xlb -f updated-values.yaml
+[OpenTelemetry metric reference](../operations/observability.md)
 
-# Force pod restart
-helm upgrade xlb ./helm/xlb -n xlb --recreate-pods
+## Environment
+
+```yaml
+env:
+  RUST_LOG: info
 ```
+
+Use `debug` temporarily for diagnosis. The release eBPF object compiles packet-level debug/trace
+logging out of the fast path; userspace debug summaries still add log volume.
 
 ## Uninstall
 
 ```bash
 helm uninstall xlb -n xlb
 ```
+
+Helm removes chart-owned resources. Registry and admin-password Secrets created separately remain
+until the operator deletes them.

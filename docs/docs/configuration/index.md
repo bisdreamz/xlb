@@ -1,15 +1,18 @@
 # Configuration Overview
 
-XLB is configured via a YAML file (`xlb.yaml`) that defines backend providers, port mappings, and operational parameters.
+XLB reads `/app/xlb.yaml` in the supported container image. The file defines the client-facing
+address and ports, backend provider, connection lifecycle, administrative surface, and optional
+OpenTelemetry export.
 
 ## Configuration File
 
-By default, XLB loads configuration from `xlb.yaml` in the current directory.
+The XLB process loads `xlb.yaml` from its current working directory. The supported container uses
+`/app`, and the Helm chart mounts its generated ConfigMap at `/app/xlb.yaml`.
 
 ## Basic Structure
 
 ```yaml
-# Optional service name for metrics
+# Optional service name for metrics and status
 name: my-loadbalancer
 
 # Listen address: auto or specific IP
@@ -60,7 +63,7 @@ otel:
 
 ### Listen Address
 
-Controls which IP address XLB binds to:
+Controls which destination IPv4 address XLB recognizes as client-facing traffic:
 
 ```yaml
 # Auto-detect primary interface IP (default)
@@ -70,6 +73,9 @@ listen: auto
 listen:
   ip: "192.168.1.10"
 ```
+
+`auto` selects the primary IPv4 address and interface associated with the host's default route. An
+explicit address must be present and routable in the deployment topology.
 
 ### Protocol
 
@@ -120,6 +126,10 @@ provider:
       - name: backend-3
         ip: 10.0.1.12
 ```
+
+The static provider requires at least one IPv4 backend. XLB resolves a route and next-hop neighbor
+for each address and skips a backend that cannot currently be reached. Static configuration is not
+hot-reloaded; restart XLB after changing the file.
 
 #### Kubernetes Provider
 
@@ -203,18 +213,8 @@ kube runtime's default backoff. Provider health in this API version means the in
 and the watch task remains alive; it does not claim that the Kubernetes control plane is currently
 reachable. A terminated watch task or stale maintenance sample fails health and readiness.
 
-### Administrative UI demo mode
-
-The UI has a separate screenshot/demo build that uses clearly labeled illustrative data and never
-polls a running XLB status API:
-
-```bash
-cd admin-ui
-npm run dev:demo
-```
-
-Vite prints the local URL, normally `http://127.0.0.1:4173/admin/`. Use `npm run build:demo` to
-produce a static production demo bundle in `admin-ui/dist`.
+See [Admin console and status API](../operations/admin-console.md) for access methods, browser
+history boundaries, authentication, Kubernetes Secret wiring, and transport security.
 
 ### Connection Management
 
@@ -268,6 +268,10 @@ otel:
     Authorization: "Bearer token"
 ```
 
+The `headers` map is written to the normal configuration file. In Kubernetes it is rendered into a
+ConfigMap, not a Secret. Prefer an in-cluster collector that does not require an application secret,
+or protect the configuration appropriately.
+
 XLB exports resource-utilization gauges as percentages from 0 through 100. This deliberate
 operator-facing representation makes autoscaler targets readable; these are percentages, not the
 0-through-1 ratios used by some OpenTelemetry semantic conventions.
@@ -307,6 +311,9 @@ and upstream traffic redistribution have been validated for the deployment. Kube
 averages a Pods custom metric across replicas; a per-instance alert should separately catch a hot
 XLB node that fleet averaging could hide. Adding replicas only helps when the upstream load balancer
 actually sends new flows to them.
+
+See [Observability](../operations/observability.md) for the complete metric catalog, labels,
+temporality, resource attributes, dashboard groups, and alerting guidance.
 
 ## Complete Examples
 
@@ -355,20 +362,26 @@ otel:
 
 XLB validates configuration on startup:
 
-- Port mappings: 1-8 required
+- one through eight port mappings are required;
+- UDP, DSR, IPv6 listen addresses, and static IPv6 backends are rejected;
+- static providers must contain at least one backend before the provider can start;
+- admin usernames must be non-empty and cannot contain `:`;
+- admin port `0` and network capacity `0` are rejected;
+- admin authentication requires a non-empty `XLB_ADMIN_PASSWORD` environment variable;
+- orphan TTL values below 300 seconds are raised to 300 with one warning.
 
-Other semantic validation is still being expanded. In particular, unknown YAML fields are currently
-accepted and an empty static backend list is not rejected during parsing.
+Unknown YAML fields are currently accepted, so review spelling carefully rather than assuming every
+unused field will fail startup.
 
-Check logs for validation errors:
+Check the container logs for validation errors:
 
 ```bash
-sudo xlb
-# or
-RUST_LOG=debug sudo xlb
+docker logs xlb
 ```
 
 ## Next Steps
 
 - [Full Configuration Reference](reference.md) - Auto-generated from schema
 - [Kubernetes Deployment](../deployment/kubernetes.md) - Helm chart configuration
+- [Connections and Upgrades](../operations/connection-lifecycle.md) - Runtime behavior
+- [Troubleshooting](../operations/troubleshooting.md) - Startup and routing failures

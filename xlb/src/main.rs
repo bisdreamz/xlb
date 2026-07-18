@@ -27,7 +27,6 @@ async fn main() -> anyhow::Result<()> {
     let config = XlbConfig::load("xlb.yaml".into())?;
     let iface = system::get_listen_iface(&config.listen)?;
     config.validate_listen_ip(iface.ip)?;
-    system::check_ip_forwarding()?;
 
     info!("Config {:?}", config);
 

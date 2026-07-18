@@ -46,6 +46,8 @@ const sortedBackends = computed(() =>
   [...filteredBackends.value].sort((left, right) => {
     const leftValue = left[sortKey.value]
     const rightValue = right[sortKey.value]
+    if (leftValue === null) return rightValue === null ? 0 : 1
+    if (rightValue === null) return -1
     const comparison =
       typeof leftValue === 'string' && typeof rightValue === 'string'
         ? leftValue.localeCompare(rightValue)
@@ -98,7 +100,7 @@ const changeSort = (key: BackendSortKey) => {
   if (sortKey.value === key) sortDirection.value = sortDirection.value === 'asc' ? 'desc' : 'asc'
   else {
     sortKey.value = key
-    sortDirection.value = key === 'name' || key === 'state' ? 'asc' : 'desc'
+    sortDirection.value = key === 'name' || key === 'state' || key === 'timeInPoolSeconds' ? 'asc' : 'desc'
   }
   page.value = 1
 }

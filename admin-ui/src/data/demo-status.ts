@@ -58,11 +58,12 @@ export const demoStatus: StatusSnapshot = {
     flow_map_percent: 17,
     overall_percent: 62,
   },
-  backends: backends.map((backend) => ({
+  backends: backends.map((backend, index) => ({
     name: backend.name,
     address: backend.ip,
     discovered: true,
     available_for_new_connections: backend.state === 'available',
+    time_in_pool_seconds: 86_400 + index * 3_600,
     connections: {
       active: backend.activeConnections,
       active_clients: backend.activeClients,

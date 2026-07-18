@@ -27,6 +27,16 @@ const sortMark = (key: BackendSortKey) =>
   props.sortKey === key ? (props.sortDirection === 'asc' ? '↑' : '↓') : '↕'
 const sortAria = (key: BackendSortKey) =>
   props.sortKey === key ? (props.sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'
+const duration = (seconds: number | null) => {
+  if (seconds === null) return 'Unavailable'
+  const days = Math.floor(seconds / 86_400)
+  const hours = Math.floor((seconds % 86_400) / 3_600)
+  const minutes = Math.floor((seconds % 3_600) / 60)
+  if (days > 0) return `${days}d ${hours}h`
+  if (hours > 0) return `${hours}h ${minutes}m`
+  if (minutes > 0) return `${minutes}m`
+  return '<1m'
+}
 </script>
 
 <template>
@@ -42,6 +52,15 @@ const sortAria = (key: BackendSortKey) =>
           <th :aria-sort="sortAria('state')">
             <button type="button" @click="$emit('sort', 'state')">
               State <i>{{ sortMark('state') }}</i>
+            </button>
+          </th>
+          <th class="numeric" :aria-sort="sortAria('timeInPoolSeconds')">
+            <button
+              type="button"
+              title="Time since this XLB instance first observed the backend"
+              @click="$emit('sort', 'timeInPoolSeconds')"
+            >
+              In pool <i>{{ sortMark('timeInPoolSeconds') }}</i>
             </button>
           </th>
           <th class="numeric" :aria-sort="sortAria('activeConnections')">
@@ -94,6 +113,9 @@ const sortAria = (key: BackendSortKey) =>
           </td>
           <td data-label="State">
             <span class="state-label" :class="`state-label--${backend.state}`">{{ backend.state }}</span>
+          </td>
+          <td class="numeric" data-label="Time in pool">
+            {{ duration(backend.timeInPoolSeconds) }}
           </td>
           <td class="numeric emphasis" data-label="Active">
             {{ integer.format(backend.activeConnections) }}

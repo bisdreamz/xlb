@@ -2,6 +2,7 @@ export type BackendState = 'available' | 'draining'
 export type BackendSortKey =
   | 'name'
   | 'state'
+  | 'timeInPoolSeconds'
   | 'activeConnections'
   | 'newConnectionsPerSecond'
   | 'ingressMbps'
@@ -13,6 +14,7 @@ export interface Backend {
   name: string
   ip: string
   state: BackendState
+  timeInPoolSeconds: number | null
   activeConnections: number
   activeClients: number
   newConnectionsPerSecond: number

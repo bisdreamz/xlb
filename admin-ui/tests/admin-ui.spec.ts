@@ -48,6 +48,11 @@ test('backend pool supports pagination, filtering, sorting, and drill-down', asy
     .getByRole('button', { name: /Backend/ })
     .click()
   await expect(page.locator('tbody tr').first()).toContainText('bidder-api-7f8797d8f4-x3j5k')
+  await page
+    .getByRole('columnheader')
+    .getByRole('button', { name: /In pool/ })
+    .click()
+  await expect(page.locator('tbody tr').first().locator('td[data-label="Time in pool"]')).toHaveText('1d 0h')
   await page.locator('tbody tr').first().click()
   const drawer = page.getByRole('dialog')
   await expect(drawer).toBeVisible()
@@ -55,6 +60,8 @@ test('backend pool supports pagination, filtering, sorting, and drill-down', asy
   await expect(page.getByRole('button', { name: 'Close backend details' })).toBeVisible()
   await expect(drawer.getByRole('button', { name: /Close breakdown.*Coming soon/ })).toBeDisabled()
   await expect(drawer.getByRole('button', { name: /Latency.*Coming soon/ })).toBeDisabled()
+  await expect(drawer.locator('.detail-list dt').filter({ hasText: 'Time in pool' })).toBeVisible()
+  await expect(drawer.locator('.detail-list').getByText('1d 0h', { exact: true })).toBeVisible()
   await expect(drawer.getByText('Client ended connection')).toHaveCount(0)
   await page.getByRole('button', { name: 'Close backend details' }).click()
 
@@ -164,7 +171,7 @@ test('connection lifecycle disables unavailable close attribution', async ({ pag
 })
 
 test('backend summaries and table remain responsive without losing mobile data', async ({ page }) => {
-  for (const width of [1_024, 820, 390]) {
+  for (const width of [1_440, 1_024, 820, 390]) {
     await page.setViewportSize({ width, height: 844 })
     await page.goto('./backends')
 
@@ -193,6 +200,7 @@ test('backend summaries and table remain responsive without losing mobile data',
   await expect(firstBackend.locator('td[data-label="Ingress"]')).toBeVisible()
   await expect(firstBackend.locator('td[data-label="Egress"]')).toBeVisible()
   await expect(firstBackend.locator('td[data-label="Idle removed / sec"]')).toBeVisible()
+  await expect(firstBackend.locator('td[data-label="Time in pool"]')).toBeVisible()
 })
 
 test('diagnostics reports the actual XDP attachment mode', async ({ page }) => {

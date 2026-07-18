@@ -39,6 +39,7 @@ struct StatusInner {
     sampled_at: Option<Instant>,
     totals: CumulativeTotals,
     backend_totals: BTreeMap<IpAddr, CumulativeTotals>,
+    backend_observed_at: BTreeMap<IpAddr, Instant>,
 }
 
 /// Shared, read-mostly operational state consumed by health checks and the
@@ -67,6 +68,7 @@ impl StatusState {
                 sampled_at: None,
                 totals: CumulativeTotals::default(),
                 backend_totals: BTreeMap::new(),
+                backend_observed_at: BTreeMap::new(),
             }),
         }
     }
@@ -121,6 +123,9 @@ impl StatusState {
             inner
                 .backend_totals
                 .retain(|address, _| present_backend_ips.contains(address));
+            inner
+                .backend_observed_at
+                .retain(|address, _| present_backend_ips.contains(address));
         }
         for (backend_ip, aggregate) in &stats.backends {
             add_to_totals(
@@ -143,13 +148,14 @@ impl StatusState {
             sample_seconds,
             inner.totals.egress_bytes,
         );
-        let backends = backend_statuses(
+        let mut backends = backend_statuses(
             stats,
             discovered_hosts,
             routable_backends,
             sample_seconds,
             &inner.backend_totals,
         );
+        apply_backend_pool_durations(&mut inner.backend_observed_at, &mut backends, sampled_at);
         let discovered_backends = backends.iter().filter(|backend| backend.discovered).count();
         let routable_backend_count = backends
             .iter()
@@ -362,6 +368,7 @@ fn backend_statuses(
             address: host.ip,
             discovered: true,
             available_for_new_connections: routable.contains(&host.ip),
+            time_in_pool_seconds: 0,
             connections: ConnectionStatus::default(),
             ingress: TrafficStatus::default(),
             egress: TrafficStatus::default(),
@@ -375,6 +382,7 @@ fn backend_statuses(
             address,
             discovered: false,
             available_for_new_connections: false,
+            time_in_pool_seconds: 0,
             connections: ConnectionStatus::default(),
             ingress: TrafficStatus::default(),
             egress: TrafficStatus::default(),
@@ -395,6 +403,19 @@ fn backend_statuses(
     }
 
     backends.into_values().collect()
+}
+
+fn apply_backend_pool_durations(
+    observed_at: &mut BTreeMap<IpAddr, Instant>,
+    backends: &mut [BackendStatus],
+    sampled_at: Instant,
+) {
+    for backend in backends {
+        let first_observed = observed_at.entry(backend.address).or_insert(sampled_at);
+        backend.time_in_pool_seconds = sampled_at
+            .saturating_duration_since(*first_observed)
+            .as_secs();
+    }
 }
 
 fn apply_cumulative_totals(backend: &mut BackendStatus, totals: &CumulativeTotals) {

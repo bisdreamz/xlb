@@ -124,6 +124,7 @@ const liveBackend = (backend: StatusSnapshot['backends'][number]): Backend => {
     name: backend.name,
     ip: backend.address,
     state: backend.available_for_new_connections ? 'available' : 'draining',
+    timeInPoolSeconds: backend.time_in_pool_seconds ?? null,
     activeConnections: backend.connections.active,
     activeClients: backend.connections.active_clients,
     newConnectionsPerSecond: backend.connections.opened_per_second,

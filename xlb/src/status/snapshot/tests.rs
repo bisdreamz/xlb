@@ -174,6 +174,90 @@ fn snapshot_reports_rates_totals_and_unavailable_draining_backends() {
 }
 
 #[test]
+fn backend_time_in_pool_survives_draining_and_resets_after_removal() {
+    let state = StatusState::new(metadata());
+    let first_seen = Instant::now();
+    let complete = LbFlowStats {
+        sample_duration_seconds: 1.0,
+        flow_map_complete: true,
+        ..Default::default()
+    };
+
+    state.publish_at(
+        &complete,
+        &[host("backend-a", "10.0.0.1")],
+        &[backend("10.0.0.1")],
+        true,
+        first_seen,
+        1,
+    );
+    assert_eq!(
+        backend_status(&state.snapshot_at(first_seen), "10.0.0.1").time_in_pool_seconds,
+        0
+    );
+
+    let mut draining = complete.clone();
+    draining
+        .backends
+        .insert(u128::from(0x0a00_0001_u32), AggregateFlowStats::default());
+    let draining_at = first_seen + Duration::from_secs(75);
+    state.publish_at(&draining, &[], &[], true, draining_at, 2);
+    assert_eq!(
+        backend_status(&state.snapshot_at(draining_at), "10.0.0.1").time_in_pool_seconds,
+        75
+    );
+
+    let incomplete = LbFlowStats {
+        sample_duration_seconds: 1.0,
+        flow_map_complete: false,
+        ..Default::default()
+    };
+    state.publish_at(
+        &incomplete,
+        &[],
+        &[],
+        true,
+        first_seen + Duration::from_secs(120),
+        3,
+    );
+    let reappeared_at = first_seen + Duration::from_secs(180);
+    state.publish_at(
+        &complete,
+        &[host("backend-a", "10.0.0.1")],
+        &[backend("10.0.0.1")],
+        true,
+        reappeared_at,
+        4,
+    );
+    assert_eq!(
+        backend_status(&state.snapshot_at(reappeared_at), "10.0.0.1").time_in_pool_seconds,
+        180
+    );
+
+    state.publish_at(
+        &complete,
+        &[],
+        &[],
+        true,
+        first_seen + Duration::from_secs(240),
+        5,
+    );
+    let rediscovered_at = first_seen + Duration::from_secs(300);
+    state.publish_at(
+        &complete,
+        &[host("backend-a", "10.0.0.1")],
+        &[backend("10.0.0.1")],
+        true,
+        rediscovered_at,
+        6,
+    );
+    assert_eq!(
+        backend_status(&state.snapshot_at(rediscovered_at), "10.0.0.1").time_in_pool_seconds,
+        0
+    );
+}
+
+#[test]
 fn backend_totals_remain_monotonic_while_a_discovered_backend_is_idle() {
     let state = StatusState::new(metadata());
     let hosts = [host("backend-a", "10.0.0.1")];

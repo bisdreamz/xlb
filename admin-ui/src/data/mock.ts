@@ -34,6 +34,7 @@ export const backends: Backend[] = definitions.map((definition, index) => {
     name,
     ip,
     state,
+    timeInPoolSeconds: 86_400 + index * 3_600,
     activeConnections: active,
     activeClients: Math.round(active * 0.61),
     newConnectionsPerSecond: state === 'draining' ? 0 : 2180 + ((index * 293) % 1040),

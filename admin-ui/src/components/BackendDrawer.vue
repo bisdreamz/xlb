@@ -2,6 +2,7 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import type { Backend } from '../types'
 import ComingSoon from './ComingSoon.vue'
+import HelpTip from './HelpTip.vue'
 import UPlotChart from './UPlotChart.vue'
 
 type HistoryView = 'connections' | 'closures' | 'latency' | 'traffic'
@@ -17,6 +18,16 @@ const emit = defineEmits<{
 
 const integer = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 })
 const bytes = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 2 })
+const duration = (seconds: number | null) => {
+  if (seconds === null) return 'Unavailable'
+  const days = Math.floor(seconds / 86_400)
+  const hours = Math.floor((seconds % 86_400) / 3_600)
+  const minutes = Math.floor((seconds % 3_600) / 60)
+  if (days > 0) return `${days}d ${hours}h`
+  if (hours > 0) return `${hours}h ${minutes}m`
+  if (minutes > 0) return `${minutes}m`
+  return `${seconds}s`
+}
 const historyView = ref<HistoryView>('connections')
 const historyViews: HistoryView[] = ['connections', 'closures', 'latency', 'traffic']
 const historyViewLabels: Record<HistoryView, string> = {
@@ -251,6 +262,15 @@ const chartUnit = computed(
               <span>Lifetime counters</span><small>Process lifetime</small>
             </div>
             <dl class="detail-list">
+              <div>
+                <dt>
+                  Time in pool
+                  <HelpTip
+                    explanation="Time since this XLB instance discovered the backend. May include periods when it was not accepting new connections."
+                  />
+                </dt>
+                <dd>{{ duration(backend.timeInPoolSeconds) }}</dd>
+              </div>
               <div>
                 <dt>Opened connections</dt>
                 <dd>{{ integer.format(backend.openedTotal) }}</dd>

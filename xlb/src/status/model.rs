@@ -161,6 +161,7 @@ pub struct BackendStatus {
     pub address: IpAddr,
     pub discovered: bool,
     pub available_for_new_connections: bool,
+    pub time_in_pool_seconds: u64,
     pub connections: ConnectionStatus,
     pub ingress: TrafficStatus,
     pub egress: TrafficStatus,

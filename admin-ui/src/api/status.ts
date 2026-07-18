@@ -44,6 +44,7 @@ export interface BackendStatus {
   address: string
   discovered: boolean
   available_for_new_connections: boolean
+  time_in_pool_seconds?: number
   connections: ConnectionStatus
   ingress: TrafficStatus
   egress: TrafficStatus

@@ -72,15 +72,31 @@ const fn default_otel_export_interval() -> u64 {
     10
 }
 
-/// Local listener for health, readiness, and administrative status.
+/// Optional HTTP Basic authentication for administrative routes.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct AdminAuthConfig {
+    /// Username accepted by the administrative UI and status API.
+    #[serde(default = "default_admin_username")]
+    pub username: String,
+}
+
+fn default_admin_username() -> String {
+    "admin".to_owned()
+}
+
+/// HTTP listener for health, readiness, and administrative status.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct AdminConfig {
-    /// Address on which the unauthenticated admin API listens.
+    /// Address on which the admin API listens.
     #[serde(default = "default_admin_address")]
     pub address: IpAddr,
     /// TCP port on which the admin API listens.
     #[serde(default = "default_admin_port")]
     pub port: u16,
+    /// Protect the administrative UI and status API with HTTP Basic auth.
+    /// The password is read from `XLB_ADMIN_PASSWORD` at startup.
+    #[serde(default)]
+    pub auth: Option<AdminAuthConfig>,
 }
 
 impl Default for AdminConfig {
@@ -88,6 +104,7 @@ impl Default for AdminConfig {
         Self {
             address: default_admin_address(),
             port: default_admin_port(),
+            auth: None,
         }
     }
 }
@@ -195,6 +212,11 @@ impl XlbConfig {
     fn validate_supported(&self) -> Result<()> {
         if self.admin.port == 0 {
             bail!("Admin API port must be between 1 and 65535");
+        }
+        if let Some(auth) = &self.admin.auth
+            && (auth.username.trim().is_empty() || auth.username.contains(':'))
+        {
+            bail!("Admin auth username must be non-empty and cannot contain ':'");
         }
         if self.resources.network_capacity_mbps == Some(0) {
             bail!("Network capacity must be greater than zero megabits per second");
@@ -348,6 +370,7 @@ shutdown_timeout: 15
 
         assert_eq!(config.admin.address, IpAddr::V4(Ipv4Addr::LOCALHOST));
         assert_eq!(config.admin.port, 9090);
+        assert!(config.admin.auth.is_none());
         assert_eq!(
             config.admin.socket_addr(),
             "127.0.0.1:9090".parse().expect("valid socket address")
@@ -380,6 +403,24 @@ shutdown_timeout: 15
             .expect_err("port zero would make the advertised endpoint unstable");
 
         assert!(error.to_string().contains("Admin API port"));
+    }
+
+    #[test]
+    fn load_accepts_admin_auth_without_storing_a_password() {
+        let yaml = format!("{MINIMAL_CONFIG}\nadmin:\n  auth:\n    username: operator\n");
+        let config = load_test_config("admin-auth", &yaml).expect("valid admin auth must load");
+        let auth = config.admin.auth.expect("admin auth is configured");
+
+        assert_eq!(auth.username, "operator");
+    }
+
+    #[test]
+    fn load_rejects_invalid_admin_auth_usernames() {
+        for (name, username) in [("blank", "   "), ("colon", "ops:user")] {
+            let yaml = format!("{MINIMAL_CONFIG}\nadmin:\n  auth:\n    username: {username:?}\n");
+            let error = load_test_config(name, &yaml).expect_err("invalid username must fail");
+            assert!(error.to_string().contains("Admin auth username"));
+        }
     }
 
     #[test]

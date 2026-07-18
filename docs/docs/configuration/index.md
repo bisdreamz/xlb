@@ -154,7 +154,7 @@ Currently only NAT mode is supported; configuring DSR fails startup.
 
 ### Health and Status API
 
-XLB serves a small, unauthenticated operational API on `127.0.0.1:9090` by default:
+XLB serves a small HTTP operational API on `127.0.0.1:9090` by default:
 
 - `GET /healthz` reports whether the process and its essential maintenance/provider tasks are live.
 - `GET /readyz` returns `200` only after the dataplane has a fresh sample, the backend provider is
@@ -169,8 +169,29 @@ admin:
   port: 9090
 ```
 
-The API exposes backend addresses and operational details and does not currently implement
-authentication. Keep it on loopback unless the deployment environment provides access control.
+The loopback default does not require authentication. To protect the UI and status snapshot with
+HTTP Basic auth, configure a username and supply the password through the process environment:
+
+```yaml
+admin:
+  address: 0.0.0.0
+  port: 9090
+  auth:
+    username: operator
+```
+
+```bash
+export XLB_ADMIN_PASSWORD='replace-with-a-strong-password'
+```
+
+Authentication covers `/admin/`, its embedded assets and client-side routes, `/`, and
+`/api/v1/status`. The `/healthz` and `/readyz` probe endpoints remain unauthenticated. XLB fails
+startup when authentication is configured without a non-empty `XLB_ADMIN_PASSWORD`.
+
+Basic auth does not encrypt HTTP. When the listener is reachable outside a trusted management
+network, terminate TLS in a reverse proxy, Gateway, tunnel, or other deployment layer. XLB logs a
+warning when an authenticated HTTP listener binds to a non-loopback address so this boundary is
+visible during deployment.
 
 The JSON snapshot includes lifecycle/readiness, provider and dataplane state, discovered and
 routable backends, active and cumulative connection counts, traffic rates and totals, flow-map
@@ -181,6 +202,19 @@ For Kubernetes discovery, watch errors retain the last-known-good backend set an
 kube runtime's default backoff. Provider health in this API version means the initial sync completed
 and the watch task remains alive; it does not claim that the Kubernetes control plane is currently
 reachable. A terminated watch task or stale maintenance sample fails health and readiness.
+
+### Administrative UI demo mode
+
+The UI has a separate screenshot/demo build that uses clearly labeled illustrative data and never
+polls a running XLB status API:
+
+```bash
+cd admin-ui
+npm run dev:demo
+```
+
+Vite prints the local URL, normally `http://127.0.0.1:4173/admin/`. Use `npm run build:demo` to
+produce a static production demo bundle in `admin-ui/dist`.
 
 ### Connection Management
 

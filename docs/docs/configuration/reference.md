@@ -2,7 +2,11 @@
 
 - [1. Property `XlbConfig > admin`](#admin)
   - [1.1. Property `XlbConfig > admin > address`](#admin_address)
-  - [1.2. Property `XlbConfig > admin > port`](#admin_port)
+  - [1.2. Property `XlbConfig > admin > auth`](#admin_auth)
+    - [1.2.1. Property `XlbConfig > admin > auth > anyOf > AdminAuthConfig`](#admin_auth_anyOf_i0)
+      - [1.2.1.1. Property `XlbConfig > admin > auth > anyOf > item 0 > username`](#admin_auth_anyOf_i0_username)
+    - [1.2.2. Property `XlbConfig > admin > auth > anyOf > item 1`](#admin_auth_anyOf_i1)
+  - [1.3. Property `XlbConfig > admin > port`](#admin_port)
 - [2. Property `XlbConfig > listen`](#listen)
   - [2.1. Property `XlbConfig > listen > oneOf > item 0`](#listen_oneOf_i0)
   - [2.2. Property `XlbConfig > listen > oneOf > item 1`](#listen_oneOf_i1)
@@ -76,10 +80,11 @@
 
 **Description:** Local health, readiness, and administrative status API.
 
-| Property                     | Pattern | Type    | Deprecated | Definition | Title/Description                                       |
-| ---------------------------- | ------- | ------- | ---------- | ---------- | ------------------------------------------------------- |
-| - [address](#admin_address ) | No      | string  | No         | -          | Address on which the unauthenticated admin API listens. |
-| - [port](#admin_port )       | No      | integer | No         | -          | TCP port on which the admin API listens.                |
+| Property                     | Pattern | Type        | Deprecated | Definition | Title/Description                                                                                                               |
+| ---------------------------- | ------- | ----------- | ---------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| - [address](#admin_address ) | No      | string      | No         | -          | Address on which the admin API listens.                                                                                         |
+| - [auth](#admin_auth )       | No      | Combination | No         | -          | Protect the administrative UI and status API with HTTP Basic auth. The password is read from \`XLB_ADMIN_PASSWORD\` at startup. |
+| - [port](#admin_port )       | No      | integer     | No         | -          | TCP port on which the admin API listens.                                                                                        |
 
 ### <a name="admin_address"></a>1.1. Property `XlbConfig > admin > address`
 
@@ -90,9 +95,56 @@
 | **Format**   | `ip`          |
 | **Default**  | `"127.0.0.1"` |
 
-**Description:** Address on which the unauthenticated admin API listens.
+**Description:** Address on which the admin API listens.
 
-### <a name="admin_port"></a>1.2. Property `XlbConfig > admin > port`
+### <a name="admin_auth"></a>1.2. Property `XlbConfig > admin > auth`
+
+|                           |                  |
+| ------------------------- | ---------------- |
+| **Type**                  | `combining`      |
+| **Required**              | No               |
+| **Additional properties** | Any type allowed |
+
+**Description:** Protect the administrative UI and status API with HTTP Basic auth. The password is read from `XLB_ADMIN_PASSWORD` at startup.
+
+| Any of(Option)                          |
+| --------------------------------------- |
+| [AdminAuthConfig](#admin_auth_anyOf_i0) |
+| [item 1](#admin_auth_anyOf_i1)          |
+
+#### <a name="admin_auth_anyOf_i0"></a>1.2.1. Property `XlbConfig > admin > auth > anyOf > AdminAuthConfig`
+
+|                           |                               |
+| ------------------------- | ----------------------------- |
+| **Type**                  | `object`                      |
+| **Required**              | No                            |
+| **Additional properties** | Any type allowed              |
+| **Defined in**            | #/definitions/AdminAuthConfig |
+
+**Description:** Optional HTTP Basic authentication for administrative routes.
+
+| Property                                     | Pattern | Type   | Deprecated | Definition | Title/Description                                          |
+| -------------------------------------------- | ------- | ------ | ---------- | ---------- | ---------------------------------------------------------- |
+| - [username](#admin_auth_anyOf_i0_username ) | No      | string | No         | -          | Username accepted by the administrative UI and status API. |
+
+##### <a name="admin_auth_anyOf_i0_username"></a>1.2.1.1. Property `XlbConfig > admin > auth > anyOf > item 0 > username`
+
+|              |           |
+| ------------ | --------- |
+| **Type**     | `string`  |
+| **Required** | No        |
+| **Default**  | `"admin"` |
+
+**Description:** Username accepted by the administrative UI and status API.
+
+#### <a name="admin_auth_anyOf_i1"></a>1.2.2. Property `XlbConfig > admin > auth > anyOf > item 1`
+
+|              |        |
+| ------------ | ------ |
+| **Type**     | `null` |
+| **Required** | No     |
+
+### <a name="admin_port"></a>1.3. Property `XlbConfig > admin > port`
 
 |              |           |
 | ------------ | --------- |

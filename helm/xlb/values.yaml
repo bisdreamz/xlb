@@ -104,11 +104,19 @@ config:
   # Graceful shutdown timeout - should match DNS TTL
   shutdown_timeout: 60
 
-  # Local, unauthenticated health and status API. Keep loopback unless access
-  # is protected by the deployment environment.
+  # HTTP health and status API. Keep loopback unless access is protected by
+  # authentication and a secure deployment transport such as TLS or a VPN.
   admin:
     address: 127.0.0.1
     port: 9090
+    auth:
+      # Protect `/admin/` and `/api/v1/status` with HTTP Basic auth. Health and
+      # readiness probes remain unauthenticated. The chart never stores the
+      # password in this values file; it must already exist in a Secret.
+      enabled: false
+      username: admin
+      existingSecret: ""
+      passwordKey: password
 
   resources:
     # Optional per-interface capacity override for cloud/virtual NICs whose

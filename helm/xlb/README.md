@@ -33,8 +33,23 @@ config:
 - The chart probes `/healthz` and `/readyz` on the local admin listener.
 - A default startup probe protects the initial Kubernetes sync and XDP attachment window.
 - `GET /api/v1/status` provides the versioned operational JSON snapshot.
-- The unauthenticated listener defaults to `127.0.0.1:9090`; keep it on loopback unless access is
-  protected externally.
+- The listener defaults to `127.0.0.1:9090`.
+- Optional HTTP Basic auth protects the UI and status API while leaving probes open.
+- The password is injected from an existing Secret through `XLB_ADMIN_PASSWORD`; it is never stored
+  in chart values or the generated ConfigMap.
+- Basic auth requires TLS or another secure transport when exposed outside a trusted network.
+
+```yaml
+config:
+  admin:
+    address: 0.0.0.0
+    port: 9090
+    auth:
+      enabled: true
+      username: operator
+      existingSecret: xlb-admin-auth
+      passwordKey: password
+```
 
 **Virtual NIC capacity:**
 

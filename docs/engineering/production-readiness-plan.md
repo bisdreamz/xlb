@@ -686,13 +686,15 @@ Review follow-ups for later, evidence-driven hardening:
   monotonic uptime when `last_run_ns` is initially zero.
 - Add multi-publish tests for cumulative backend totals across prune and
   reappearance transitions.
-- Add authentication and request limits before supporting remote admin access.
+- Optional HTTP Basic authentication is implemented for the UI and status API; add request limits
+  if evidence from remotely exposed deployments shows they are needed.
 
 Security/deployment:
 
 - Bind management to localhost by default for direct/bare-metal use.
 - Make the bind address/port configurable.
-- Allow optional authentication when exposed beyond localhost.
+- Allow optional authentication when exposed beyond localhost. Implemented with an
+  environment-backed password; TLS remains a deployment-layer responsibility.
 - Do not expose client IP/flow detail by default; the page is aggregate/backend
   operational data.
 - Replace the Helm shell probes (`ip link | grep xdp`) with HTTP `/healthz` and

@@ -1,17 +1,21 @@
 use super::StatusState;
 use anyhow::{Context, Result, anyhow};
 use axum::body::Body;
-use axum::extract::{Path, State};
-use axum::http::{HeaderValue, StatusCode, header};
+use axum::extract::{Path, Request, State};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
 use axum::{Json, Router};
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use log::info;
 use rust_embed::RustEmbed;
 use std::borrow::Cow;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
+use subtle::ConstantTimeEq;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
@@ -20,6 +24,38 @@ use tokio::task::JoinHandle;
 struct AdminUi;
 
 const UI_CONTENT_SECURITY_POLICY: &str = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'";
+const ADMIN_PASSWORD_ENV: &str = "XLB_ADMIN_PASSWORD";
+const BASIC_AUTH_CHALLENGE: &str = "Basic realm=\"XLB admin\", charset=\"UTF-8\"";
+
+/// Credentials protecting the administrative UI and versioned status API.
+/// Deliberately does not implement `Debug` so the password cannot be logged
+/// through normal structured configuration output.
+#[derive(Clone)]
+pub struct AdminAuth {
+    username: Arc<str>,
+    password: Arc<str>,
+}
+
+impl AdminAuth {
+    pub fn from_env(username: String) -> Result<Self> {
+        let password = std::env::var(ADMIN_PASSWORD_ENV).with_context(|| {
+            format!("Admin auth requires environment variable {ADMIN_PASSWORD_ENV}")
+        })?;
+        Self::new(username, password)
+    }
+
+    fn new(username: String, password: String) -> Result<Self> {
+        if password.is_empty() {
+            return Err(anyhow!(
+                "Admin auth environment variable {ADMIN_PASSWORD_ENV} cannot be empty"
+            ));
+        }
+        Ok(Self {
+            username: username.into(),
+            password: password.into(),
+        })
+    }
+}
 
 pub struct AdminServerHandle {
     shutdown: Option<oneshot::Sender<()>>,
@@ -85,6 +121,7 @@ impl AdminServerHandle {
 pub async fn start_admin_server(
     listen: SocketAddr,
     status: Arc<StatusState>,
+    auth: Option<AdminAuth>,
 ) -> Result<AdminServerHandle> {
     let listener = tokio::net::TcpListener::bind(listen)
         .await
@@ -92,7 +129,7 @@ pub async fn start_admin_server(
     let local_addr = listener
         .local_addr()
         .context("Failed to read admin HTTP server address")?;
-    let app = router(status);
+    let app = router(status, auth);
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
     let (exit_tx, exit_rx) = oneshot::channel();
 
@@ -114,16 +151,66 @@ pub async fn start_admin_server(
     })
 }
 
-fn router(status: Arc<StatusState>) -> Router {
-    Router::new()
+fn router(status: Arc<StatusState>, auth: Option<AdminAuth>) -> Router {
+    let mut administrative = Router::new()
         .route("/", get(admin_redirect))
         .route("/admin", get(admin_redirect))
         .route("/admin/", get(admin_index))
         .route("/admin/{*path}", get(admin_asset))
+        .route("/api/v1/status", get(api_status));
+    if let Some(auth) = auth {
+        administrative =
+            administrative.route_layer(middleware::from_fn_with_state(auth, require_admin_auth));
+    }
+
+    Router::new()
+        .merge(administrative)
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
-        .route("/api/v1/status", get(api_status))
         .with_state(status)
+}
+
+async fn require_admin_auth(
+    State(auth): State<AdminAuth>,
+    request: Request,
+    next: Next,
+) -> Response {
+    if authorization_matches(request.headers(), &auth) {
+        return next.run(request).await;
+    }
+
+    let mut response = text_response(StatusCode::UNAUTHORIZED, "authentication required");
+    response.headers_mut().insert(
+        header::WWW_AUTHENTICATE,
+        HeaderValue::from_static(BASIC_AUTH_CHALLENGE),
+    );
+    response
+}
+
+fn authorization_matches(headers: &HeaderMap, auth: &AdminAuth) -> bool {
+    let Some(value) = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+    else {
+        return false;
+    };
+    let mut fields = value.split_ascii_whitespace();
+    let (Some(scheme), Some(encoded), None) = (fields.next(), fields.next(), fields.next()) else {
+        return false;
+    };
+    if !scheme.eq_ignore_ascii_case("Basic") {
+        return false;
+    }
+    let Ok(decoded) = BASE64_STANDARD.decode(encoded) else {
+        return false;
+    };
+    let Some(separator) = decoded.iter().position(|byte| *byte == b':') else {
+        return false;
+    };
+    let (username, password_with_separator) = decoded.split_at(separator);
+    let password = &password_with_separator[1..];
+
+    bool::from(username.ct_eq(auth.username.as_bytes()) & password.ct_eq(auth.password.as_bytes()))
 }
 
 async fn admin_redirect() -> Redirect {
@@ -297,14 +384,21 @@ mod tests {
     }
 
     async fn request(app: Router, uri: &str) -> Response {
-        app.oneshot(
-            Request::builder()
-                .uri(uri)
-                .body(Body::empty())
-                .expect("valid request"),
-        )
-        .await
-        .expect("admin response")
+        request_with_authorization(app, uri, None).await
+    }
+
+    async fn request_with_authorization(
+        app: Router,
+        uri: &str,
+        authorization: Option<&str>,
+    ) -> Response {
+        let mut request = Request::builder().uri(uri);
+        if let Some(authorization) = authorization {
+            request = request.header(header::AUTHORIZATION, authorization);
+        }
+        app.oneshot(request.body(Body::empty()).expect("valid request"))
+            .await
+            .expect("admin response")
     }
 
     #[tokio::test]
@@ -350,7 +444,7 @@ mod tests {
 
     #[tokio::test]
     async fn router_exposes_only_the_versioned_status_path() {
-        let app = router(state());
+        let app = router(state(), None);
         let status_response = app
             .clone()
             .oneshot(
@@ -377,7 +471,7 @@ mod tests {
 
     #[tokio::test]
     async fn admin_ui_redirects_and_serves_spa_routes_safely() {
-        let app = router(state());
+        let app = router(state(), None);
         let redirect = request(app.clone(), "/").await;
         assert_eq!(redirect.status(), StatusCode::PERMANENT_REDIRECT);
         assert_eq!(
@@ -427,6 +521,63 @@ mod tests {
 
         let missing_asset = request(app, "/admin/assets/missing.js").await;
         assert_eq!(missing_asset.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn optional_basic_auth_protects_admin_routes_but_not_health_probes() {
+        let auth = AdminAuth::new("operator".into(), "secret:with-colons".into())
+            .expect("valid test credentials");
+        let app = router(state(), Some(auth));
+
+        for path in ["/", "/admin/", "/api/v1/status"] {
+            let response = request(app.clone(), path).await;
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{path}");
+            assert_eq!(
+                response.headers().get(header::WWW_AUTHENTICATE),
+                Some(&HeaderValue::from_static(BASIC_AUTH_CHALLENGE)),
+                "{path}"
+            );
+            assert_eq!(
+                response.headers().get(header::CACHE_CONTROL),
+                Some(&HeaderValue::from_static("no-store")),
+                "{path}"
+            );
+        }
+
+        let wrong = format!("Basic {}", BASE64_STANDARD.encode("operator:wrong"));
+        assert_eq!(
+            request_with_authorization(app.clone(), "/api/v1/status", Some(&wrong))
+                .await
+                .status(),
+            StatusCode::UNAUTHORIZED
+        );
+
+        let valid = format!(
+            "Basic {}",
+            BASE64_STANDARD.encode("operator:secret:with-colons")
+        );
+        assert_eq!(
+            request_with_authorization(app.clone(), "/api/v1/status", Some(&valid))
+                .await
+                .status(),
+            StatusCode::OK
+        );
+        assert_eq!(
+            request(app.clone(), "/healthz").await.status(),
+            StatusCode::OK
+        );
+        assert_eq!(
+            request(app, "/readyz").await.status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+    }
+
+    #[test]
+    fn admin_auth_rejects_an_empty_password() {
+        let error = AdminAuth::new("operator".into(), String::new())
+            .err()
+            .expect("empty password must fail");
+        assert!(error.to_string().contains(ADMIN_PASSWORD_ENV));
     }
 
     #[test]

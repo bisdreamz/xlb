@@ -9,7 +9,9 @@ mod system;
 use crate::config::{BackendSource, XlbConfig};
 use crate::r#loop::{MaintenanceLoop, MaintenanceMaps};
 use crate::provider::{BackendProvider, FixedProvider, KubernetesProvider};
-use crate::status::{PortStatus, ProviderKind, StatusMetadata, StatusState, start_admin_server};
+use crate::status::{
+    AdminAuth, PortStatus, ProviderKind, StatusMetadata, StatusState, start_admin_server,
+};
 use anyhow::{Context, anyhow};
 use aya::maps::{Array, HashMap, PerCpuArray};
 use log::{info, warn};
@@ -29,11 +31,24 @@ async fn main() -> anyhow::Result<()> {
 
     info!("Config {:?}", config);
 
+    let admin_auth = config
+        .admin
+        .auth
+        .as_ref()
+        .map(|auth| AdminAuth::from_env(auth.username.clone()))
+        .transpose()?;
     if !config.admin.address.is_loopback() {
-        warn!(
-            "Admin API is unauthenticated and configured on non-loopback address {}",
-            config.admin.address
-        );
+        if admin_auth.is_some() {
+            warn!(
+                "Admin API uses HTTP Basic auth on non-loopback address {}; protect it with TLS or another secure transport",
+                config.admin.address
+            );
+        } else {
+            warn!(
+                "Admin API is unauthenticated and configured on non-loopback address {}",
+                config.admin.address
+            );
+        }
     }
 
     let service_name = config.name.clone().unwrap_or_else(|| "xlb".to_string());
@@ -100,7 +115,8 @@ async fn main() -> anyhow::Result<()> {
             })
             .collect(),
     }));
-    let mut admin_server = start_admin_server(config.admin.socket_addr(), status.clone()).await?;
+    let mut admin_server =
+        start_admin_server(config.admin.socket_addr(), status.clone(), admin_auth).await?;
 
     let maint_loop = MaintenanceLoop::new(
         provider.clone(),

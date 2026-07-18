@@ -132,6 +132,11 @@ config:
   admin:
     address: 127.0.0.1
     port: 9090
+    auth:
+      enabled: false
+      username: admin
+      existingSecret: ""
+      passwordKey: password
 
   # Set this when a cloud/virtual NIC reports an unknown link speed.
   resources:
@@ -146,6 +151,30 @@ config:
 ```
 
 See [Configuration Reference](../configuration/reference.md) for detailed field documentation.
+
+To enable HTTP Basic auth without placing the password in Helm values, create a Secret and reference
+it from the chart:
+
+```bash
+kubectl create secret generic xlb-admin-auth \
+  --from-literal=password='replace-with-a-strong-password'
+```
+
+```yaml
+config:
+  admin:
+    address: 0.0.0.0
+    port: 9090
+    auth:
+      enabled: true
+      username: operator
+      existingSecret: xlb-admin-auth
+      passwordKey: password
+```
+
+This protects the administrative UI and status API but intentionally leaves health probes open.
+Provide TLS or another secure transport before exposing Basic auth outside a trusted management
+network.
 
 ### Health Probes
 

@@ -36,6 +36,10 @@ data:
     admin:
       address: {{ .Values.config.admin.address | quote }}
       port: {{ .Values.config.admin.port }}
+      {{- if .Values.config.admin.auth.enabled }}
+      auth:
+        username: {{ required "config.admin.auth.username is required when admin auth is enabled" .Values.config.admin.auth.username | quote }}
+      {{- end }}
     resources:
       network_capacity_mbps: {{ .Values.config.resources.network_capacity_mbps | toJson }}
     {{- if .Values.config.otel.enabled }}

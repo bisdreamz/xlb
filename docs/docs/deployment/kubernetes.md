@@ -61,8 +61,10 @@ The Helm chart configures HTTP probes against XLB's loopback-only admin API:
 - `/api/v1/status` exposes the versioned operational JSON used by the embedded admin page.
 - `/admin/` serves the local-instance console from the same loopback-only listener.
 
-The admin listener defaults to `127.0.0.1:9090`. Because it is unauthenticated and includes backend
-addresses, do not bind it externally without deployment-level access controls.
+The admin listener defaults to `127.0.0.1:9090`. Optional HTTP Basic auth protects `/admin/` and
+`/api/v1/status` using a password supplied through `XLB_ADMIN_PASSWORD`; health and readiness probes
+remain open. Basic auth does not encrypt HTTP, so externally reachable deployments must provide a
+secure transport such as TLS, a VPN, or a managed tunnel.
 
 EndpointSlice watch errors use the kube runtime's default backoff, and XLB retains its
 last-known-good backend set during a control-plane interruption. Provider health in the initial API

@@ -46,6 +46,13 @@ spec:
         env:
         - name: RUST_LOG
           value: {{ .Values.env.RUST_LOG | quote }}
+        {{- if .Values.config.admin.auth.enabled }}
+        - name: XLB_ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ required "config.admin.auth.existingSecret is required when admin auth is enabled" .Values.config.admin.auth.existingSecret | quote }}
+              key: {{ required "config.admin.auth.passwordKey is required when admin auth is enabled" .Values.config.admin.auth.passwordKey | quote }}
+        {{- end }}
         - name: POD_NAME
           valueFrom:
             fieldRef:

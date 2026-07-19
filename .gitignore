@@ -41,5 +41,6 @@ admin-ui/test-results/
 xlb.yaml
 
 # Documentation build output
+docs/node_modules/
 docs/site/
 docs/schema.json

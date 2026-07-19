@@ -43,7 +43,7 @@ Otherwise it returns `503` and one of these stable reasons:
 - `backend_provider_unhealthy`
 - `no_routable_backends`
 
-Use readiness—not liveness—to decide whether an upstream distributor should send new traffic to an
+Use readiness, not liveness, to decide whether an upstream distributor should send new traffic to an
 instance.
 
 ## What the console shows

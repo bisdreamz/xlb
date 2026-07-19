@@ -1,7 +1,7 @@
 # Helm chart reference
 
 The XLB chart creates a host-networked Deployment, Service, ServiceAccount, configuration ConfigMap,
-and—when Kubernetes discovery is selected—namespace-scoped RBAC for the configured backend Service
+and, when Kubernetes discovery is selected, namespace-scoped RBAC for the configured backend Service
 and EndpointSlices.
 
 Your Neuronic support representative will provide the chart and matching container-image details for

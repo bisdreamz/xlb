@@ -1,0 +1,29 @@
+# XLB documentation
+
+XLB is a commercially supported, XDP-native IPv4/TCP Layer 4 load balancer for Kubernetes,
+bare-metal Linux hosts, and virtual machines. It is built for high-volume services that need lower
+infrastructure cost, minimal maintenance, and tuning-free operation.
+
+## Start here
+
+- [Documentation overview](https://docs.runxlb.com/)
+- [Kubernetes quick start](https://docs.runxlb.com/getting-started/kubernetes/)
+- [Bare metal and Docker quick start](https://docs.runxlb.com/getting-started/quickstart/)
+- [Deployment options](https://docs.runxlb.com/getting-started/installation/)
+- [Architecture](https://docs.runxlb.com/architecture/)
+
+## Configure and operate XLB
+
+- [Configuration overview](https://docs.runxlb.com/configuration/)
+- [Configuration reference](https://docs.runxlb.com/configuration/reference/)
+- [Kubernetes deployment guide](https://docs.runxlb.com/deployment/kubernetes/)
+- [Helm chart reference](https://docs.runxlb.com/deployment/helm/)
+- [Admin console and status API](https://docs.runxlb.com/operations/admin-console/)
+- [OpenTelemetry observability](https://docs.runxlb.com/operations/observability/)
+- [Connections and upgrades](https://docs.runxlb.com/operations/connection-lifecycle/)
+- [Troubleshooting](https://docs.runxlb.com/operations/troubleshooting/)
+
+## Product and commercial information
+
+- [XLB product site](https://runxlb.com/)
+- [Evaluate XLB](https://runxlb.com/evaluate/)

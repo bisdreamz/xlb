@@ -1,0 +1,17 @@
+{
+  "name": "run-xlb-docs",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "mkdocs serve -f mkdocs.yml",
+    "build": "mkdocs build --strict -f mkdocs.yml",
+    "verify": "npm run build",
+    "pages:dev": "npm run build && wrangler pages dev site",
+    "deploy:preview": "npm run verify && wrangler pages deploy site --project-name run-xlb-docs --branch preview",
+    "deploy:production": "npm run verify && wrangler pages deploy site --project-name run-xlb-docs --branch main",
+    "deploy": "npm run deploy:production"
+  },
+  "devDependencies": {
+    "wrangler": "^4.112.0"
+  }
+}

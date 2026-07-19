@@ -5,22 +5,10 @@ userspace while the traffic path executes in an eBPF program attached at XDP.
 
 ## Packet path
 
-XLB handles application traffic in the kernel. It chooses a backend when a TCP connection begins,
-keeps that connection pinned to the same backend, and rewrites packets in both directions. Later
-packets use the connection state already stored in XDP, without returning to userspace for routing
-decisions or packet copies.
-
-```text
-client              XLB host                         backend
-  |   VIP:443 SYN       |                               |
-  |-------------------->| select backend + create pair  |
-  |                     |------------------------------>|
-  |                     |<------------------------------|
-  |<--------------------| rewrite return packet          |
-```
-
-The client sees one TCP connection to the XLB address. XLB does not accept it in a userspace socket
-or create a second proxy-owned connection to the backend.
+XLB handles application traffic in the kernel. It selects a backend when a TCP connection begins,
+keeps the connection pinned to that backend, and forwards traffic in both directions without
+accepting the connection in a userspace socket or creating a second proxy-owned connection. This
+avoids userspace payload copying and the overhead of maintaining two connections for every client.
 
 ## Flow identity and affinity
 

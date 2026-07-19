@@ -59,7 +59,7 @@ config:
       service: backend-service
 
 service:
-  type: ClusterIP
+  enabled: true
 
 externalDNS:
   enabled: false
@@ -68,9 +68,9 @@ externalDNS:
 Replace `application` and `backend-service` with the namespace and name of the Service that owns
 your backend EndpointSlices. Remove `imagePullSecrets` when registry authentication is not needed.
 
-`ClusterIP` is appropriate when traffic reaches the XLB node addresses directly through DNS,
-BGP/anycast, or provider routing. Choosing `LoadBalancer` can provision another managed load
-balancer in front of XLB.
+The chart creates a headless Service. It publishes the host-networked XLB Pod addresses for
+discovery without allocating a virtual IP or adding kube-proxy forwarding. Production traffic
+reaches those node addresses directly through DNS, BGP/anycast, or provider routing.
 
 ## 3. Install XLB
 

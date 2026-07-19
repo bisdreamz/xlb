@@ -109,26 +109,22 @@ The chart defaults are:
 
 ```yaml
 service:
-  type: LoadBalancer
+  enabled: true
   annotations: {}
 
 externalDNS:
-  enabled: true
+  enabled: false
   ttl: 60
 ```
 
-Choose the Service type deliberately:
-
-- `ClusterIP` works with direct node DNS/routing and avoids asking Kubernetes to provision another
-  managed load balancer.
-- `LoadBalancer` delegates external exposure to the cloud provider and can retain a managed
-  load-balancer layer in front of XLB.
-
-Override the defaults with `service.type: ClusterIP` and normally `externalDNS.enabled: false` for a
-direct node-address deployment.
+This Service is headless: the template sets `clusterIP: None`. It publishes the host-networked XLB
+Pod addresses but does not create a virtual IP, configure kube-proxy forwarding, or ask the cloud
+provider for a managed load balancer. Disable it with `service.enabled: false` when another system
+owns discovery of the node addresses.
 
 When `externalDNS.enabled` is true, the chart adds the configured TTL annotation. Add the provider's
-hostname annotation under `service.annotations` when using a Service-based ExternalDNS source.
+hostname annotation under `service.annotations` and confirm that ExternalDNS publishes the headless
+endpoint addresses correctly for the target provider.
 
 ## Service account and RBAC
 
@@ -226,8 +222,8 @@ config:
       remote_port: 8443
 ```
 
-XLB requires one through eight mappings. The Service exposes each `local_port`; the backend receives
-traffic at its corresponding `remote_port`.
+XLB requires one through eight mappings. The headless Service advertises each `local_port`; the
+backend receives traffic at its corresponding `remote_port`.
 
 ## Admin authentication
 

@@ -2,7 +2,7 @@ apiVersion: v2
 name: xlb
 description: High-performance eBPF Layer 4 Load Balancer
 type: application
-version: 0.1.0
+version: 0.1.1
 appVersion: "0.1.0"
 kubeVersion: ">=1.26.0-0"
 keywords:
@@ -12,4 +12,4 @@ keywords:
   - networking
 maintainers:
   - name: Neuronic
-    email: emaczura@neuronic.dev
+    url: https://runxlb.com

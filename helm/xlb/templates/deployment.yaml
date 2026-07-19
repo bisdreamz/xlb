@@ -76,6 +76,21 @@ spec:
               resource: limits.cpu
               divisor: 1m
 
+        # XLB handles service traffic in XDP rather than a userspace socket.
+        # Declaring the host ports still lets the scheduler prevent another
+        # Kubernetes workload from claiming the same node ports.
+        ports:
+        {{- range $index, $port := .Values.config.ports }}
+        - name: xlb-{{ $index }}
+          containerPort: {{ $port.local_port }}
+          hostPort: {{ $port.local_port }}
+          protocol: {{ upper $.Values.config.proto }}
+        {{- end }}
+        - name: admin
+          containerPort: {{ .Values.config.admin.port }}
+          hostPort: {{ .Values.config.admin.port }}
+          protocol: TCP
+
         {{- if .Values.startupProbe }}
         startupProbe:
           {{- toYaml .Values.startupProbe | nindent 12 }}

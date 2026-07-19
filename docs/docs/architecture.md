@@ -68,9 +68,9 @@ Every XLB instance owns an independent backend view, flow map, metrics stream, a
 Instances do not replicate connection state or aggregate their local consoles.
 
 High availability therefore requires an upstream distribution mechanism such as direct DNS records,
-provider routing, BGP/anycast, or another environment-specific ingress design. A Kubernetes
-`Service` of type `LoadBalancer` can also distribute traffic, but it retains the managed
-load-balancer layer and its associated behavior and cost.
+provider routing, BGP/anycast, or another environment-specific ingress design. Kubernetes
+deployments can publish their host-networked instance addresses through the chart's headless
+Service without adding a virtual IP or another load-balancing layer.
 
 OpenTelemetry is the supported path for durable, fleet-wide aggregation. The embedded console is
 deliberately scoped to the XLB instance serving the page.

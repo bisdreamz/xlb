@@ -102,7 +102,7 @@ config:
 terminationGracePeriodSeconds: 90
 
 service:
-  type: ClusterIP
+  enabled: true
 
 externalDNS:
   enabled: false
@@ -180,44 +180,21 @@ not required.
 When `serviceAccount.create: false`, the chart does not create this RBAC. Grant the existing account
 equivalent permissions yourself.
 
-## Choose how clients reach XLB
+## Route clients directly to XLB
 
-The Helm chart creates a Kubernetes Service, but the correct Service type depends on the surrounding
-network design.
-
-### Direct node routing
+The chart creates a headless Service whose endpoints are the host-networked XLB Pod addresses. A
+headless Service has no virtual IP and does not add kube-proxy load balancing in front of XLB.
 
 Use direct DNS records, BGP/anycast, provider routes, or another environment-specific mechanism to
-send traffic to the XLB node addresses. `service.type: ClusterIP` is sufficient for Kubernetes
-metadata and internal access in this model; external traffic reaches the host-networked XLB
-interface directly.
-
-This is the relevant model when XLB is intended to replace a usage-priced managed network load
+send production traffic to those node addresses. The chart does not create a managed cloud load
 balancer.
-
-### Managed Service LoadBalancer
-
-Setting:
-
-```yaml
-service:
-  type: LoadBalancer
-```
-
-asks the Kubernetes cloud integration to provision or attach its normal managed load-balancer
-resource. That can be useful during evaluation or when the provider supplies required address
-advertisement, but it leaves another load-balancer layer and its cost in front of XLB.
-
-Do not assume that installing XLB with `type: LoadBalancer` eliminates the provider's managed-LB
-charge. Confirm the generated infrastructure and packet path for the target platform.
 
 ### ExternalDNS
 
-The chart can add an ExternalDNS TTL annotation and accepts any additional Service annotations:
+The chart can add an ExternalDNS TTL annotation to its headless Service:
 
 ```yaml
 service:
-  type: LoadBalancer
   annotations:
     external-dns.alpha.kubernetes.io/hostname: lb.example.com
 
@@ -226,9 +203,8 @@ externalDNS:
   ttl: 60
 ```
 
-ExternalDNS behavior depends on the Service type and provider integration. For direct node-address
-records, manage the DNS source and record lifecycle explicitly rather than assuming the Service
-status contains the desired addresses.
+ExternalDNS must be configured to publish headless, host-networked endpoints for the target DNS
+provider. Confirm the generated A records before directing production traffic to them.
 
 ## Host-network behavior
 
@@ -247,9 +223,14 @@ Consequences include:
 - host/cloud firewalls must allow the configured service ports;
 - another host-networked workload cannot bind a conflicting admin port.
 
-The default required Pod anti-affinity enforces one XLB Pod per node. A replica remains Pending when
-there are too few eligible nodes. Use `nodeSelector`, taints/tolerations, and dedicated node pools to
-make placement intentional.
+The default required Pod anti-affinity applies across namespaces and enforces one XLB Pod per node.
+The Pod also declares each configured traffic port and the admin port as host ports, preventing
+another Kubernetes workload that declares the same host port from being scheduled there. A replica
+remains Pending when there are too few eligible nodes.
+
+For production, use `nodeSelector`, taints/tolerations, and dedicated XLB node pools. Kubernetes
+cannot detect an unmanaged host process or a Pod that uses a port without declaring it, while XLB's
+XDP program receives matching packets before a normal host socket.
 
 ## Health probes
 

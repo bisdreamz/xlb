@@ -27,11 +27,11 @@ securityContext:
   privileged: true
 
 service:
-  type: LoadBalancer
+  # The chart creates a headless discovery Service. It publishes the XLB Pod
+  # addresses without allocating a virtual IP or adding kube-proxy load
+  # balancing in front of XLB.
+  enabled: true
   annotations: {}
-    # Example ExternalDNS annotations:
-    # external-dns.alpha.kubernetes.io/hostname: lb.example.com
-    # external-dns.alpha.kubernetes.io/ttl: "60"
 
 resources:
   limits:
@@ -54,6 +54,9 @@ affinity:
               operator: In
               values:
                 - xlb
+        # Prevent XLB releases in different namespaces from attaching to the
+        # same node interface.
+        namespaceSelector: {}
         topologyKey: kubernetes.io/hostname
 
 # Graceful shutdown configuration
@@ -62,7 +65,9 @@ terminationGracePeriodSeconds: 90
 
 # ExternalDNS integration
 externalDNS:
-  enabled: true
+  # Enable only after configuring ExternalDNS to publish the addresses of
+  # headless, host-networked XLB endpoints for the target DNS provider.
+  enabled: false
   # DNS TTL - should match xlb.yaml shutdown_timeout
   ttl: 60
 

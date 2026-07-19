@@ -8,8 +8,7 @@ versions from different releases.
 
 ## Install
 
-Create a values file that supplies at least the release image, backend Service, port mapping, and
-chosen exposure model:
+Create a values file that supplies at least the release image, backend Service, and port mapping:
 
 ```yaml
 image:
@@ -26,7 +25,7 @@ config:
       service: backend-service
 
 service:
-  type: ClusterIP
+  enabled: true
 
 externalDNS:
   enabled: false
@@ -54,8 +53,15 @@ The chart uses `hostNetwork: true` and Deployment strategy `Recreate`. An upgrad
 zero-downtime rolling replacement. Coordinate external traffic before changing a production
 release.
 
-`service.type: LoadBalancer` can provision a cloud-managed load balancer in front of XLB. Use
-`ClusterIP` plus direct node DNS/routing when the goal is to replace that managed layer.
+The chart's Service is headless. It publishes the host-networked Pod addresses for discovery but
+does not allocate a virtual IP, configure kube-proxy forwarding, or provision a cloud-managed load
+balancer. Send production traffic directly to the XLB node addresses through DNS, BGP/anycast, or
+provider routing.
+
+The Pod declares every XLB traffic port and the admin port as a host port. Kubernetes therefore
+avoids scheduling another Pod that declares the same host port onto that node. For production,
+select dedicated XLB nodes with `nodeSelector` and taints/tolerations so unmanaged host processes
+and workloads that omit host-port declarations cannot contend with the XLB packet path.
 
 ## Health and administration
 

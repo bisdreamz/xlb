@@ -6,8 +6,9 @@ separately.
 
 ## Kubernetes
 
-Use the supplied Helm chart. It configures the host networking, privileged access, BPF filesystem
-mounts, health probes, and EndpointSlice RBAC that XLB needs.
+Kubernetes runs the same XLB container image as the bare-metal path. The supplied Helm chart is the
+recommended installer because it configures host networking, node placement, privileged access,
+health probes, and EndpointSlice RBAC consistently.
 
 The two essential placement settings are:
 
@@ -16,7 +17,8 @@ The two essential placement settings are:
 
 Do not remove either setting. Select enough eligible nodes for the requested replica count, then
 let the chart discover ready, serving, non-terminating endpoints from the configured backend
-Service.
+Service. The chart also declares the configured XLB ports as host ports so Kubernetes does not
+schedule another declared host-port workload onto the same ports.
 
 [Start on Kubernetes](kubernetes.md)
 

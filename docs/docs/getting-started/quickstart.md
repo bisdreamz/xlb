@@ -1,4 +1,4 @@
-# Bare metal and Docker
+# Bare metal quick start
 
 This guide runs one XLB instance with two static backend servers using the support-provided image.
 

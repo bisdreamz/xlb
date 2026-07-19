@@ -33,23 +33,24 @@ extra_css:
   - stylesheets/extra.css
 
 nav:
-  - Overview: index.md
-  - Getting Started:
-    - Deployment Options: getting-started/installation.md
-    - Kubernetes Quick Start: getting-started/kubernetes.md
-    - Bare Metal Quick Start: getting-started/quickstart.md
-  - Architecture: architecture.md
+  - Start:
+    - XLB Overview: index.md
+    - Choose a Deployment: getting-started/installation.md
+  - Kubernetes:
+    - Quick Start: getting-started/kubernetes.md
+    - Deployment Guide: deployment/kubernetes.md
+    - Helm Reference: deployment/helm.md
+  - Bare Metal:
+    - Quick Start: getting-started/quickstart.md
   - Configuration:
     - Overview: configuration/index.md
     - Reference: configuration/reference.md
-  - Deployment:
-    - Kubernetes Guide: deployment/kubernetes.md
-    - Helm Chart: deployment/helm.md
   - Operations:
     - Admin Console: operations/admin-console.md
     - Observability: operations/observability.md
     - Connections and Upgrades: operations/connection-lifecycle.md
     - Troubleshooting: operations/troubleshooting.md
+  - Architecture: architecture.md
   - runxlb.com: https://runxlb.com
 
 markdown_extensions:

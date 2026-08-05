@@ -13,7 +13,9 @@ use xlb_common::XlbErr;
 use xlb_common::config::ebpf::Strategy;
 use xlb_common::types::{Backend, Flow, FlowDirection, FlowKeyV4};
 
-const MAX_PORT_ATTEMPTS: usize = 5;
+// Keep the translated-port search bounded for eBPF verification. At 50% pool
+// occupancy, sixteen random probes reduce exhaustion from 1/32 to 1/65,536.
+const MAX_PORT_ATTEMPTS: usize = 16;
 
 #[map(name = "FLOW_PAIR_INVARIANTS")]
 static FLOW_PAIR_INVARIANTS: PerCpuArray<u64> = PerCpuArray::with_max_entries(1, 0);

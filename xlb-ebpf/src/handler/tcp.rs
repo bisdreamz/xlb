@@ -159,7 +159,7 @@ pub(super) fn existing_flow(
         Some(ptr) => ptr,
         None => {
             if *direction == FlowDirection::ToClient {
-                return Ok(TcpOutcome::Pass);
+                return Ok(TcpOutcome::PASS);
             }
             return Err(XlbErr::ErrOrphanedFlow);
         }
@@ -172,7 +172,7 @@ pub(super) fn existing_flow(
     flow.packets_transfer += 1;
     flow.last_seen_ns = utils::monotonic_time_ns();
 
-    Ok(TcpOutcome::Forward(PacketFlow {
+    Ok(TcpOutcome::forward(PacketFlow {
         iface: utils::flow_to_iface(flow),
         src_mac: flow.src_mac,
         dst_mac: flow.dst_mac,

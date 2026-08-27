@@ -65,7 +65,7 @@ pub fn handle_syn(
         ExistingSyn::Reuse => {
             return existing_flow(packet, &FlowDirection::ToServer, flow_map);
         }
-        ExistingSyn::Drop => return Ok(TcpOutcome::Drop),
+        ExistingSyn::Drop => return Ok(TcpOutcome::DROP),
         ExistingSyn::Create => {}
     }
 
@@ -73,14 +73,14 @@ pub fn handle_syn(
     let backend = balancing::select_backend(strategy, backends).ok_or(XlbErr::ErrNoBackends)?;
 
     match install_flow_pair(packet, backend, port_map_dest, flow_map) {
-        Ok(flow) => Ok(TcpOutcome::Forward(flow)),
+        Ok(flow) => Ok(TcpOutcome::forward(flow)),
         Err(InstallError::ForwardConflict) => match prepare_existing_syn(packet, flow_map) {
             ExistingSyn::Reuse => existing_flow(packet, &FlowDirection::ToServer, flow_map),
-            ExistingSyn::Create | ExistingSyn::Drop => Ok(TcpOutcome::Drop),
+            ExistingSyn::Create | ExistingSyn::Drop => Ok(TcpOutcome::DROP),
         },
         Err(InstallError::NoEphemeralPorts) => {
             packet.rst()?;
-            Ok(TcpOutcome::Reply)
+            Ok(TcpOutcome::REPLY)
         }
         Err(InstallError::MapInsertFailed) => Err(XlbErr::ErrMapInsertFailed),
     }

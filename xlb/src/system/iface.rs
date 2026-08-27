@@ -9,6 +9,17 @@ pub struct ListenIface {
     pub ver: IpVersion,
 }
 
+fn select_default_address<T>(addresses: &[T], is_same_subnet: impl Fn(&T) -> bool) -> Option<&T> {
+    addresses
+        .iter()
+        .find(|address| is_same_subnet(address))
+        // Routed host addresses such as OVH's public /32 have an explicitly
+        // on-link gateway outside their CIDR. The interface is already the
+        // OS-selected default; accept its sole address rather than rejecting
+        // that valid route. Multiple unmatched addresses remain ambiguous.
+        .or_else(|| (addresses.len() == 1).then(|| &addresses[0]))
+}
+
 /// Detects the default interface and ip address to listen on
 /// by retrieving the interface associated with the default
 /// route and returning the first address on the same
@@ -22,21 +33,18 @@ fn detect_default() -> Result<ListenIface> {
 
     match gateway.ip_addr {
         IpAddr::V4(gw_ip) => {
-            let ip = interface
-                .ipv4
-                .iter()
-                .find(|addr| {
-                    let mask = if addr.prefix_len == 0 {
-                        0
-                    } else {
-                        (!0u32) << (32 - addr.prefix_len)
-                    };
-                    let ip_bits = u32::from(addr.addr);
-                    let gw_bits = u32::from(gw_ip);
-                    (ip_bits & mask) == (gw_bits & mask)
-                })
-                .map(|addr| IpAddr::V4(addr.addr))
-                .ok_or_else(|| anyhow::anyhow!("No IPv4 address in same subnet as gateway"))?;
+            let ip = select_default_address(&interface.ipv4, |addr| {
+                let mask = if addr.prefix_len == 0 {
+                    0
+                } else {
+                    (!0u32) << (32 - addr.prefix_len)
+                };
+                let ip_bits = u32::from(addr.addr);
+                let gw_bits = u32::from(gw_ip);
+                (ip_bits & mask) == (gw_bits & mask)
+            })
+            .map(|addr| IpAddr::V4(addr.addr))
+            .ok_or_else(|| anyhow::anyhow!("No IPv4 address in same subnet as gateway"))?;
 
             Ok(ListenIface {
                 name: interface.name,
@@ -45,21 +53,18 @@ fn detect_default() -> Result<ListenIface> {
             })
         }
         IpAddr::V6(gw_ip) => {
-            let ip = interface
-                .ipv6
-                .iter()
-                .find(|addr| {
-                    let mask = if addr.prefix_len == 0 {
-                        0
-                    } else {
-                        (!0u128) << (128 - addr.prefix_len)
-                    };
-                    let ip_bits = u128::from(addr.addr);
-                    let gw_bits = u128::from(gw_ip);
-                    (ip_bits & mask) == (gw_bits & mask)
-                })
-                .map(|addr| IpAddr::V6(addr.addr))
-                .ok_or_else(|| anyhow::anyhow!("No IPv6 address in same subnet as gateway"))?;
+            let ip = select_default_address(&interface.ipv6, |addr| {
+                let mask = if addr.prefix_len == 0 {
+                    0
+                } else {
+                    (!0u128) << (128 - addr.prefix_len)
+                };
+                let ip_bits = u128::from(addr.addr);
+                let gw_bits = u128::from(gw_ip);
+                (ip_bits & mask) == (gw_bits & mask)
+            })
+            .map(|addr| IpAddr::V6(addr.addr))
+            .ok_or_else(|| anyhow::anyhow!("No IPv6 address in same subnet as gateway"))?;
 
             Ok(ListenIface {
                 name: interface.name,
@@ -104,5 +109,37 @@ pub fn get_listen_iface(listen: &ListenAddr) -> Result<ListenIface> {
     match listen {
         ListenAddr::Auto => detect_default(),
         ListenAddr::Ip(ip) => get_iface_for_ip(ip.parse()?),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::select_default_address;
+
+    #[test]
+    fn accepts_the_only_address_for_a_routed_host_address() {
+        let addresses = ["135.148.170.68/32"];
+
+        assert_eq!(
+            select_default_address(&addresses, |_| false),
+            Some(&addresses[0])
+        );
+    }
+
+    #[test]
+    fn refuses_to_guess_between_unmatched_addresses() {
+        let addresses = ["192.0.2.10/32", "192.0.2.11/32"];
+
+        assert_eq!(select_default_address(&addresses, |_| false), None);
+    }
+
+    #[test]
+    fn prefers_the_address_matching_the_gateway_subnet() {
+        let addresses = ["192.0.2.10/24", "198.51.100.10/24"];
+
+        assert_eq!(
+            select_default_address(&addresses, |address| address.starts_with("198.51.100.")),
+            Some(&addresses[1])
+        );
     }
 }

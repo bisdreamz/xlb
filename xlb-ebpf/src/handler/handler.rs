@@ -1,5 +1,5 @@
 use crate::handler::iface::Iface;
-use crate::handler::types::TcpOutcome;
+use crate::handler::types::TcpAction;
 use crate::handler::{tcp, utils};
 use crate::net::eth::MacAddr;
 use crate::net::packet::Packet;
@@ -48,18 +48,24 @@ impl PacketHandler {
                     return Ok(PacketEvent::Reply);
                 }
 
-                match tcp::handle_tcp_packet(
+                let outcome = match tcp::handle_tcp_packet(
                     packet,
                     &direction,
                     backends,
                     flow_map,
                     &config.strategy,
                     port_map.remote_port,
-                )? {
-                    TcpOutcome::Pass => Ok(PacketEvent::Pass),
-                    TcpOutcome::Drop => Ok(PacketEvent::Drop),
-                    TcpOutcome::Reply => Ok(PacketEvent::Reply),
-                    TcpOutcome::Forward(flow) => {
+                ) {
+                    Ok(outcome) => outcome,
+                    Err(err) => return Err(err),
+                };
+
+                match outcome.action {
+                    TcpAction::Pass => Ok(PacketEvent::Pass),
+                    TcpAction::Drop => Ok(PacketEvent::Drop),
+                    TcpAction::Reply => Ok(PacketEvent::Reply),
+                    TcpAction::Forward => {
+                        let flow = outcome.flow;
                         packet.reroute(
                             &MacAddr::new(flow.src_mac),
                             &MacAddr::new(flow.dst_mac),

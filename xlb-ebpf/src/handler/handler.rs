@@ -10,6 +10,14 @@ use xlb_common::XlbErr;
 use xlb_common::config::ebpf::EbpfConfig;
 use xlb_common::types::{Backend, Flow, FlowKeyV4};
 
+/// Disposition handed back to the XDP entry point.
+///
+/// `Forward` carries a payload the other variants leave unwritten, the same
+/// shape `TcpOutcome` had to abandon for pre-6.4 verifiers. It loads today
+/// because `handle` has a single call site and is inlined into the XDP entry,
+/// where the `Iface` slot is read only on the forward path after the branch.
+/// Re-check the generated object if `handle` gains a caller or this enum
+/// changes shape.
 pub enum PacketEvent {
     Pass,
     Drop,
@@ -48,24 +56,21 @@ impl PacketHandler {
                     return Ok(PacketEvent::Reply);
                 }
 
-                let outcome = match tcp::handle_tcp_packet(
+                let outcome = tcp::handle_tcp_packet(
                     packet,
                     &direction,
                     backends,
                     flow_map,
                     &config.strategy,
                     port_map.remote_port,
-                ) {
-                    Ok(outcome) => outcome,
-                    Err(err) => return Err(err),
-                };
+                )?;
 
                 match outcome.action {
                     TcpAction::Pass => Ok(PacketEvent::Pass),
                     TcpAction::Drop => Ok(PacketEvent::Drop),
                     TcpAction::Reply => Ok(PacketEvent::Reply),
                     TcpAction::Forward => {
-                        let flow = outcome.flow;
+                        let flow = &outcome.flow;
                         packet.reroute(
                             &MacAddr::new(flow.src_mac),
                             &MacAddr::new(flow.dst_mac),

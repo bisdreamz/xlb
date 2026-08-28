@@ -13,12 +13,7 @@ pub struct PacketFlow {
 
 impl PacketFlow {
     const EMPTY: Self = Self {
-        iface: Iface {
-            idx: 0,
-            mac: [0; 6],
-            src_mac: [0; 6],
-            src_ip: 0,
-        },
+        iface: Iface::EMPTY,
         src_mac: [0; 6],
         dst_mac: [0; 6],
         src_ip: 0,
@@ -42,10 +37,14 @@ pub enum TcpAction {
 
 /// Result of TCP processing before conversion to an XDP packet event.
 ///
-/// The flow field is initialized for every action because LLVM can copy an
-/// inactive Rust enum payload before branching on its discriminant. Linux
-/// 5.15's eBPF verifier correctly rejects that uninitialized stack read.
-/// Keeping a fixed result avoids it without changing packet disposition.
+/// The flow field is initialized for every action because LLVM may copy an
+/// inactive Rust enum payload before branching on its discriminant. eBPF
+/// verifiers before the ~6.4 relaxation that lets privileged programs read
+/// uninitialized stack slots as scalars reject that read, so a unit variant
+/// fails to load on kernels such as Linux 5.15 (OVH MKS). A fixed, fully
+/// written result removes the uninitialized bytes without changing packet
+/// disposition; the copy itself still happens, its source is now always
+/// written.
 pub struct TcpOutcome {
     pub action: TcpAction,
     pub flow: PacketFlow,

@@ -1,4 +1,4 @@
-use crate::config::XlbConfig;
+use crate::config::{XdpAttachMode, XlbConfig};
 use crate::status::{XdpAttachment, XdpAttachmentMode};
 use crate::system::ListenIface;
 use anyhow::{Result, anyhow};
@@ -81,10 +81,37 @@ pub fn load_ebpf_program(config: &XlbConfig, iface: &ListenIface) -> Result<Load
     let skip_prefixes = ["lo", "cilium", "lxc", "anchor", "cpbridge"];
     let skip_bridges = ["docker0", "virbr"];
 
+    // Validate an explicit list up front. Attaching to nothing, or to
+    // everything except the interface carrying the VIP, would leave the
+    // dataplane silently inert, so both are startup failures.
+    if !config.xdp_interfaces.is_empty() {
+        for name in &config.xdp_interfaces {
+            if !interfaces.iter().any(|i| &i.name == name) {
+                return Err(anyhow!(
+                    "xdp_interfaces lists {name}, which does not exist on this host"
+                ));
+            }
+        }
+        if !config.xdp_interfaces.iter().any(|n| n == &iface.name) {
+            return Err(anyhow!(
+                "xdp_interfaces must include the listen interface {}",
+                iface.name
+            ));
+        }
+    }
+
     let mut attachments = Vec::new();
     for interface in interfaces {
-        // Skip loopback and bridge interfaces
-        if skip_prefixes
+        // An explicit list replaces the name heuristics entirely.
+        if !config.xdp_interfaces.is_empty() {
+            if !config.xdp_interfaces.contains(&interface.name) {
+                info!(
+                    "Skipping interface {} (not listed in xdp_interfaces)",
+                    interface.name
+                );
+                continue;
+            }
+        } else if skip_prefixes
             .iter()
             .any(|prefix| interface.name.starts_with(prefix))
             || skip_bridges
@@ -98,19 +125,31 @@ pub fn load_ebpf_program(config: &XlbConfig, iface: &ListenIface) -> Result<Load
             continue;
         }
 
-        // Try native XDP first, then generic SKB mode.
-        let attach_result = program
-            .attach(&interface.name, XdpMode::Driver)
-            .map(|link_id| (link_id, XdpAttachmentMode::Native))
-            .or_else(|driver_error| {
-                warn!(
-                    "Native XDP attach failed for {}: {}; retrying in SKB mode",
-                    interface.name, driver_error
-                );
-                program
-                    .attach(&interface.name, XdpMode::Skb)
-                    .map(|link_id| (link_id, XdpAttachmentMode::Generic))
-            });
+        let attach_result = match config.xdp_attach_mode {
+            // Native only, so a missing fast path surfaces instead of being
+            // silently downgraded.
+            XdpAttachMode::Native => program
+                .attach(&interface.name, XdpMode::Driver)
+                .map(|link_id| (link_id, XdpAttachmentMode::Native)),
+            // Generic only. Lets native and generic be A/B tested on the same
+            // build rather than depending on native attach happening to fail.
+            XdpAttachMode::Skb => program
+                .attach(&interface.name, XdpMode::Skb)
+                .map(|link_id| (link_id, XdpAttachmentMode::Generic)),
+            // Try native XDP first, then generic SKB mode.
+            XdpAttachMode::Auto => program
+                .attach(&interface.name, XdpMode::Driver)
+                .map(|link_id| (link_id, XdpAttachmentMode::Native))
+                .or_else(|driver_error| {
+                    warn!(
+                        "Native XDP attach failed for {}: {}; retrying in SKB mode",
+                        interface.name, driver_error
+                    );
+                    program
+                        .attach(&interface.name, XdpMode::Skb)
+                        .map(|link_id| (link_id, XdpAttachmentMode::Generic))
+                }),
+        };
 
         match attach_result {
             Ok((_, mode)) => {
@@ -124,6 +163,22 @@ pub fn load_ebpf_program(config: &XlbConfig, iface: &ListenIface) -> Result<Load
                 });
             }
             Err(e) => {
+                // An explicit `xdp_interfaces` list is a statement that these
+                // interfaces matter, so failing to attach to one must surface
+                // rather than leave the dataplane silently absent there.
+                //
+                // Auto-discovery keeps the historical warn-and-continue: it
+                // selects interfaces by name heuristic and may well pick one
+                // that cannot take XDP at all, which is not a reason to refuse
+                // to start.
+                if !config.xdp_interfaces.is_empty() {
+                    return Err(anyhow!(
+                        "XDP attach failed for {}, which is listed in xdp_interfaces (mode {:?}): {}",
+                        interface.name,
+                        config.xdp_attach_mode,
+                        e
+                    ));
+                }
                 warn!(
                     "XDP ATTACH FAILED for {}: {} (continuing)",
                     interface.name, e

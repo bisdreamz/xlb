@@ -123,6 +123,34 @@ const fn default_admin_port() -> u16 {
     9090
 }
 
+/// How the dataplane attaches to interfaces.
+///
+/// Native driver mode is the intended fast path. Generic/SKB mode runs the same
+/// program later, after skb allocation, and transmits via the skb/netdev path
+/// instead of the driver's XDP transmit queues. That path picks a queue with
+/// `netdev_core_pick_tx` and takes its lock, but deliberately bypasses the qdisc
+/// layer and packet taps.
+///
+/// Which performs better is hardware dependent and should be measured, not
+/// assumed. On virtio-net in particular, dedicated XDP transmit queues are only
+/// allocated when `curr_queue_pairs + nr_cpu_ids <= max_queue_pairs`; otherwise
+/// `XDP_TX` and `XDP_REDIRECT` share the regular transmit queues. Clouds that
+/// expose one queue pair per vCPU never satisfy that condition, which makes the
+/// two modes worth A/B testing there.
+#[derive(Debug, Clone, Copy, Deserialize, Default, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum XdpAttachMode {
+    /// Attempt native driver mode, fall back to generic/SKB on failure.
+    #[default]
+    Auto,
+    /// Require native driver mode, never falling back to generic. Applies to
+    /// every selected interface, so an interface that cannot attach natively
+    /// aborts startup.
+    Native,
+    /// Always attach in generic/SKB mode.
+    Skb,
+}
+
 /// Capacity inputs that cannot always be discovered from virtual hardware.
 #[derive(Debug, Clone, Deserialize, Default, JsonSchema)]
 pub struct ResourceConfig {
@@ -181,6 +209,31 @@ pub struct XlbConfig {
     /// Optional resource-capacity overrides for virtualized environments.
     #[serde(default)]
     pub resources: ResourceConfig,
+    /// Interfaces the dataplane attaches to.
+    ///
+    /// Empty (the default) keeps the historical behaviour: attach to every
+    /// interface whose name does not start with one of a fixed set of prefixes
+    /// (`lo`, `cilium`, `lxc`, `anchor`, `cpbridge`, `docker0`, `virbr`). That
+    /// is a name heuristic, not device-type detection: it does not recognise
+    /// every CNI, and a bridge named e.g. `br0` is still selected.
+    ///
+    /// Listing interfaces explicitly replaces the heuristic entirely and is the
+    /// precise option where the topology is known. It must include the listen
+    /// interface and every interface backends return traffic on; for same-host
+    /// container backends that is the veth, not just the uplink.
+    ///
+    /// Startup fails only if a listed interface does not exist, or if the listen
+    /// interface is not listed. Completeness is NOT validated: omitting a
+    /// backend return interface still silently breaks reverse NAT for it. The
+    /// set is also resolved once at startup, so veths created later are never
+    /// attached.
+    #[serde(default)]
+    pub xdp_interfaces: Vec<String>,
+    /// How the dataplane attaches to interfaces: `auto` (native with generic
+    /// fallback), `native` (require native, fail startup otherwise), or `skb`
+    /// (force generic). Defaults to `auto`, the historical behaviour.
+    #[serde(default)]
+    pub xdp_attach_mode: XdpAttachMode,
 }
 
 pub const MIN_ORPHAN_TTL_SECS: u32 = 5 * 60;
@@ -376,6 +429,17 @@ shutdown_timeout: 15
             "127.0.0.1:9090".parse().expect("valid socket address")
         );
         assert_eq!(config.resources.network_capacity_mbps, None);
+        assert_eq!(config.xdp_attach_mode, XdpAttachMode::Auto);
+        assert!(config.xdp_interfaces.is_empty());
+    }
+
+    #[test]
+    fn load_accepts_an_explicit_interface_list() {
+        let yaml = format!("{MINIMAL_CONFIG}\nxdp_interfaces:\n  - ens3\n  - ens4\n");
+        let config = load_test_config("xdp-interfaces", &yaml)
+            .expect("an explicit interface list must load");
+
+        assert_eq!(config.xdp_interfaces, vec!["ens3", "ens4"]);
     }
 
     #[test]
@@ -385,6 +449,29 @@ shutdown_timeout: 15
             .expect("positive network capacity must load");
 
         assert_eq!(config.resources.network_capacity_mbps, Some(2_000));
+    }
+
+    #[test]
+    fn load_accepts_explicit_xdp_attach_modes() {
+        for (value, expected) in [
+            ("auto", XdpAttachMode::Auto),
+            ("native", XdpAttachMode::Native),
+            ("skb", XdpAttachMode::Skb),
+        ] {
+            let yaml = format!("{MINIMAL_CONFIG}\nxdp_attach_mode: {value}\n");
+            let config = load_test_config(&format!("xdp-attach-{value}"), &yaml)
+                .expect("documented attach mode must load");
+
+            assert_eq!(config.xdp_attach_mode, expected);
+        }
+    }
+
+    #[test]
+    fn load_rejects_unknown_xdp_attach_mode() {
+        let yaml = format!("{MINIMAL_CONFIG}\nxdp_attach_mode: driver\n");
+
+        load_test_config("xdp-attach-unknown", &yaml)
+            .expect_err("an unrecognized attach mode must not silently default");
     }
 
     #[test]
